@@ -1,0 +1,17 @@
+services:
+  live-photo-tool:
+    build: .
+    # Apple Silicon 主机如遇 HEIC/FFmpeg 兼容问题，可改为 linux/amd64
+    # platform: linux/amd64
+    ports:
+      - "8080:8080"
+    volumes:
+      # 挂载工作目录，容器重启不丢失进行中的任务
+      - ./workspace:/app/workspace
+      # 可选：把自己的 .cube 放进 ./my-luts，重启即生效（无需上传）
+      - ./my-luts:/app/luts/user
+    environment:
+      - MAX_UPLOAD_SIZE_GB=4
+      - SESSION_TIMEOUT_HOURS=1
+      - FLASK_ENV=production
+    restart: unless-stopped

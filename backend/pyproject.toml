@@ -1,0 +1,14 @@
+[project]
+name = "live-photo-tool"
+version = "0.1.0"
+description = "LOG 视频套 LUT + 导出 Apple Live Photo 的本地 Web 工具"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "flask==3.0.0",
+    "flask-cors==4.0.0",
+    "pillow==10.2.0",
+    "pillow-heif==0.15.0",
+    "mutagen==1.47.0",
+    "werkzeug==3.0.1",
+    "gunicorn==21.2.0",
+]

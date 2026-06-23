@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Photo Tool</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- 顶栏 -->
+  <header class="topbar">
+    <span class="logo">📷 Live Photo Tool</span>
+    <span id="filename" class="filename">未选择文件</span>
+    <button id="reset-video-btn" class="btn-link topbar-action hidden" type="button">↺ 重新选择视频</button>
+  </header>
+
+  <!-- 上传区（初始态） -->
+  <section id="upload-view" class="upload-view">
+    <div id="dropzone" class="dropzone">
+      <p>拖拽 .mov / .mp4 文件到此处，或点击选择</p>
+      <input type="file" id="file-input" accept=".mov,.mp4" hidden>
+    </div>
+    <div id="upload-progress" class="progress hidden">
+      <div class="progress-label">代理生成中…</div>
+      <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+    </div>
+  </section>
+
+  <!-- 编辑区（就绪后显示） -->
+  <main id="editor-view" class="editor-view hidden">
+    <div class="editor-grid">
+      <!-- 视频预览区 -->
+      <section class="preview-pane">
+        <video id="video" controls></video>
+        <div class="video-controls">
+          <span id="video-time" class="video-time">当前帧：0.0s</span>
+          <button id="set-cover-btn" class="btn set-cover" type="button">📷 把当前帧设为封面</button>
+        </div>
+        <div class="preview-frame">
+          <img id="preview-img" alt="预览帧" class="hidden">
+        </div>
+      </section>
+
+      <!-- 右侧面板 -->
+      <aside class="side-pane">
+        <div class="panel">
+          <h3><span class="ic">🎨</span> LUT 选择</h3>
+          <select id="lut-select"></select>
+          <div class="lut-upload">
+            <label class="btn-small">
+              ⬆ 上传自定义 LUT
+              <input type="file" id="lut-input" accept=".cube" hidden>
+            </label>
+          </div>
+          <label class="slider-row">
+            <span class="slider-label">强度 <b id="intensity-value">100%</b></span>
+            <input type="range" id="intensity" min="0" max="100" value="100">
+          </label>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <h3><span class="ic">🎚️</span> 色彩调整</h3>
+            <button id="reset-adjust" class="btn-link" type="button">重置</button>
+          </div>
+          <div id="adjust-sliders"></div>
+        </div>
+
+        <div class="panel">
+          <h3><span class="ic">🖼️</span> 封面帧预览</h3>
+          <button id="preview-btn" class="btn">▶ 预览当前帧</button>
+          <p class="hint">点击视频区「把当前帧设为封面」可选取封面；调整滑块后会自动重新预览。</p>
+        </div>
+      </aside>
+    </div>
+
+    <!-- 时间轴 -->
+    <section class="timeline-pane">
+      <div class="timeline-head">
+        <span>时间轴 · 拖动选择片段与封面</span>
+        <span class="timeline-actions">
+          <button id="preview-clip-btn" class="btn-small" type="button">▶ 预览选区片段</button>
+          <span class="timeline-legend">
+            <span class="legend-dot">选区</span>
+            <span class="legend-dot cover">封面</span>
+          </span>
+        </span>
+      </div>
+      <canvas id="timeline" height="90"></canvas>
+    </section>
+
+    <!-- 状态栏 -->
+    <footer class="statusbar">
+      <span id="clip-duration">已选时长：0.0s</span>
+      <span class="spacer"></span>
+      <div class="export-group">
+        <label class="format-label">
+          格式
+          <select id="export-format" class="name-input">
+            <option value="apple">Apple Live Photo (HEIC+MOV)</option>
+            <option value="samsung">三星 Motion Photo (JPG)</option>
+          </select>
+        </label>
+        <input type="text" id="output-name" value="IMG_0001" class="name-input" placeholder="文件名">
+        <button id="export-btn" class="btn primary">⬇ 导出</button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- 选区片段预览弹框 -->
+  <div id="clip-modal" class="modal hidden" role="dialog" aria-modal="true">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <div class="modal-head">
+        <span>选区片段预览</span>
+        <button id="clip-modal-close" class="btn-link" type="button">✕ 关闭</button>
+      </div>
+      <div class="modal-body">
+        <div id="clip-modal-loading" class="modal-loading hidden">渲染中…</div>
+        <video id="clip-modal-video" controls loop autoplay playsinline></video>
+      </div>
+      <p class="hint">已套用当前 LUT + 色调调整；预览为低分辨率代理，导出为全画质。</p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
