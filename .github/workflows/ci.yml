@@ -1,0 +1,105 @@
+name: CI
+
+# 推送到 main、以及针对 main 的 PR 时触发；也支持手动触发
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 同一分支的新推送取消正在跑的旧 run，省额度
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------------------------------------------------------------
+  # 1. 前端 JS 语法检查
+  # -------------------------------------------------------------------------
+  frontend-check:
+    name: Frontend · JS 语法检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 检查 JS 语法 (node --check)
+        run: |
+          set -e
+          cd frontend
+          fail=0
+          for f in *.js; do
+            if node --check "$f" 2>err.txt; then
+              echo "✓ $f"
+            else
+              echo "✗ $f"
+              cat err.txt
+              fail=1
+            fi
+          done
+          rm -f err.txt
+          exit $fail
+
+  # -------------------------------------------------------------------------
+  # 2. 后端导入 / 语法检查
+  # -------------------------------------------------------------------------
+  backend-check:
+    name: Backend · 导入检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖（ffmpeg）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: 安装 uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: 同步依赖
+        run: |
+          cd backend
+          uv sync --frozen
+
+      - name: 语法检查（py_compile）
+        run: |
+          cd backend
+          uv run python -m compileall -q app.py config.py modules/
+
+      - name: 导入检查（确认模块能正常加载）
+        run: |
+          cd backend
+          uv run python -c "import app; import config; from modules import ffmpeg_utils, lut_manager, live_photo, session_manager; print('import OK')"
+
+  # -------------------------------------------------------------------------
+  # 3. Docker 镜像构建验证（不发布）
+  # -------------------------------------------------------------------------
+  docker-build:
+    name: Docker · 镜像构建验证
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 构建镜像（利用层缓存，不推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: live-photo-tool:ci
+
+      - name: 冒烟：镜像内可正常调用 ffmpeg / python
+        run: |
+          docker run --rm live-photo-tool:ci sh -c "ffmpeg -version | head -1 && uv run --frozen python -c 'import flask; print(\"flask\", flask.__version__)'"
