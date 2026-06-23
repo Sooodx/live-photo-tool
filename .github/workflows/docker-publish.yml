@@ -57,7 +57,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            sooodx/live-photo-tool:${{ steps.meta.outputs.image_tag }}
-            sooodx/live-photo-tool:latest
+            siuux/live-photo-tool:${{ steps.meta.outputs.image_tag }}
+            siuux/live-photo-tool:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
