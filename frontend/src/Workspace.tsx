@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { exportPhoto, proxyUrl } from './api'
 import type { ColorPayload, SessionInfo, ThumbnailList } from './api'
-import { ExportBar } from './components/ExportBar'
+import { ExportDialog } from './components/ExportDialog'
 import { FallbackFrame } from './components/FallbackFrame'
 import { GradingPanel } from './components/GradingPanel'
 import { LivePhotoControls, LivePhotoPreview } from './components/LivePhotoPreview'
@@ -271,7 +271,9 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
 
   return (
     <>
-      <TopBar info={info} mode={mode} onMode={changeMode} onReset={onReset} resetting={resetting} />
+      <TopBar info={info} mode={mode} onMode={changeMode} onReset={onReset} resetting={resetting}
+        actions={<ExportDialog format={format} name={name} exporting={exporting}
+          disabled={exportDisabled} onFormat={setFormat} onName={setName} onExport={() => { void download() }} />} />
       <main className="workspace">
         <WorkspaceLayout live={live}
           preview={<VideoViewport info={info} clock={clock} canvasRef={renderer.canvasRef}
@@ -304,8 +306,6 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
             curve={curve} lutLoading={luts.loading} lutUploading={luts.uploading}
             onSelect={id => { void luts.select(id) }} onUpload={file => { void luts.upload(file) }}
             onIntensity={setIntensity} onAdjust={adjust} onReset={resetGrade} />} />
-        <ExportBar selection={selection} format={format} name={name} exporting={exporting}
-          disabled={exportDisabled} onFormat={setFormat} onName={setName} onExport={() => { void download() }} />
       </main>
     </>
   )

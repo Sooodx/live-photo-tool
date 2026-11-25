@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
-import { AudioLines, Diamond, ZoomIn, ZoomOut } from 'lucide-react'
+import { ArrowRight, AudioLines, Diamond, ZoomIn, ZoomOut } from 'lucide-react'
 import type { Thumbnail, ThumbnailList } from '../api'
 import type { VideoClock } from '../hooks/useVideoScrubber'
 import { clamp, timecode } from '../model'
@@ -258,7 +258,16 @@ export const Timeline = memo(function Timeline({
   return (
     <section className="timeline panel" aria-label="视频时间轴" hidden={hidden}>
       <header className="panel-heading timeline-heading">
-        <h2><AudioLines size={16} /> 时间轴</h2>
+        <div className="timeline-title">
+          <h2><AudioLines size={16} /> 时间轴</h2>
+          <div className="timeline-summary" role="group" aria-label="选区和封面时间">
+            <span className="summary-range">
+              {timecode(inPoint)}<ArrowRight size={13} aria-hidden="true" /><span className="sr-only">至</span>{timecode(outPoint)}
+            </span>
+            <span className="duration-label">{(outPoint - inPoint).toFixed(2)} s</span>
+            <span className="summary-cover">封面 <span>{timecode(coverTime)}</span></span>
+          </div>
+        </div>
         <div className="timeline-tools">
           <label className="zoom-control">
             <ZoomOut size={15} aria-hidden="true" />

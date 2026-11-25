@@ -1,13 +1,15 @@
 import { Film, LoaderCircle, ScanLine, Upload } from 'lucide-react'
+import type { ReactNode } from 'react'
 import type { SessionInfo } from '../api'
 import type { WorkspaceMode } from '../model'
 
-export function TopBar({ info, mode, onMode, onReset, resetting }: {
+export function TopBar({ info, mode, onMode, onReset, resetting, actions }: {
   info?: SessionInfo
   mode?: WorkspaceMode
   onMode?: (mode: WorkspaceMode) => void
   onReset?: () => void
   resetting: boolean
+  actions?: ReactNode
 }) {
   return (
     <header className="topbar">
@@ -23,9 +25,12 @@ export function TopBar({ info, mode, onMode, onReset, resetting }: {
       )}
       <div className="topbar-right">
         {info && <span className="source-filename" title={info.filename}><Film size={14} /> {info.filename}</span>}
-        {onReset && <button className="button secondary" onClick={onReset} disabled={resetting}>
-          {resetting ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />} 更换视频
+        {onReset && <button className="button secondary topbar-reset" onClick={onReset}
+          disabled={resetting} aria-label="更换视频" title="更换视频">
+          {resetting ? <LoaderCircle size={15} className="spin" /> : <Upload size={15} />}
+          <span>更换视频</span>
         </button>}
+        {actions}
       </div>
     </header>
   )
