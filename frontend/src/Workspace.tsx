@@ -9,6 +9,7 @@ import type { LivePhase } from './components/LivePhotoPreview'
 import { Timeline } from './components/Timeline'
 import { TopBar } from './components/TopBar'
 import { AudioControl, EditingControls, VideoViewport } from './components/VideoViewport'
+import { WorkspaceLayout } from './components/WorkspaceLayout'
 import { buildToneCurve } from './engine/toneCurve'
 import type { Grade } from './engine/webglLutRenderer'
 import { useExactPreview } from './hooks/useExactPreview'
@@ -271,9 +272,9 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   return (
     <>
       <TopBar info={info} mode={mode} onMode={changeMode} onReset={onReset} resetting={resetting} />
-      <main className={`workspace ${live ? 'workspace-live' : ''}`}>
-        <div className="workspace-grid">
-          <VideoViewport info={info} clock={clock} canvasRef={renderer.canvasRef}
+      <main className="workspace">
+        <WorkspaceLayout live={live}
+          preview={<VideoViewport info={info} clock={clock} canvasRef={renderer.canvasRef}
             ratio={ratio} live={live} animated={phase === 'playing'} fallback={fallback} comparing={!live && comparing}
             ready={ready || (live && showingExact)}
             video={<video ref={videoRef} className="proxy-video" src={proxyUrl(id)}
@@ -296,16 +297,13 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
             ) : (
               <EditingControls playing={video.playing} ready={ready} looping={looping} comparing={comparing}
                 onToggle={toggle} onLoop={() => setLooping(!looping)} onCompare={setComparing} onCover={markCover} audio={audio} />
-            )} />
-          <Timeline hidden={live} selection={selection} thumbnails={thumbnails} duration={duration} frameDuration={frameDuration}
-            clock={clock} onChange={updateSelection} onScrub={seek} onDragStart={pause} />
-          {!live && (
-            <GradingPanel luts={luts.list} selectedId={luts.requestedId} intensity={intensity} adjustments={adjustments}
-              curve={curve} lutLoading={luts.loading} lutUploading={luts.uploading}
-              onSelect={id => { void luts.select(id) }} onUpload={file => { void luts.upload(file) }}
-              onIntensity={setIntensity} onAdjust={adjust} onReset={resetGrade} />
-          )}
-        </div>
+            )} />}
+          timeline={<Timeline hidden={live} selection={selection} thumbnails={thumbnails} duration={duration}
+            frameDuration={frameDuration} clock={clock} onChange={updateSelection} onScrub={seek} onDragStart={pause} />}
+          grading={<GradingPanel luts={luts.list} selectedId={luts.requestedId} intensity={intensity} adjustments={adjustments}
+            curve={curve} lutLoading={luts.loading} lutUploading={luts.uploading}
+            onSelect={id => { void luts.select(id) }} onUpload={file => { void luts.upload(file) }}
+            onIntensity={setIntensity} onAdjust={adjust} onReset={resetGrade} />} />
         <ExportBar selection={selection} format={format} name={name} exporting={exporting}
           disabled={exportDisabled} onFormat={setFormat} onName={setName} onExport={() => { void download() }} />
       </main>

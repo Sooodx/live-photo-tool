@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import shutil
 import struct
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -19,17 +18,13 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-from app.config import BACKEND_DIR, Settings
+from app.config import Settings
 from app.main import create_app
 from app.services import ffmpeg_service
 
 
-BUILTINS = {
-    "VLog_to_V709", "VLog_to_V709_Warm", "VLog_to_V709_Cool",
-    "SLog3_to_S709", "SLog2_to_S709", "LogC_to_Rec709",
-}
 GRADE = {
-    "lut_id": "VLog_to_V709",
+    "lut_id": "user_Film_Grade",
     "lut_intensity": 0.5,
     "adjustments": {
         "exposure": 10, "contrast": -20, "highlights": 120,
@@ -69,10 +64,13 @@ def source_video(tmp_path_factory):
 def settings(tmp_path_factory):
     root = tmp_path_factory.mktemp("app")
     luts_dir = root / "luts"
-    shutil.copytree(BACKEND_DIR / "luts", luts_dir, ignore=shutil.ignore_patterns("user"))
     user_dir = luts_dir / "user"
-    user_dir.mkdir()
-    shutil.copyfile(luts_dir / "VLog_to_V709.cube", user_dir / "Film Grade.cube")
+    user_dir.mkdir(parents=True)
+    rgb_rows = (
+        f"{blue / 32:.6f} {green / 32:.6f} {red / 32:.6f}\n"
+        for blue in range(33) for green in range(33) for red in range(33)
+    )
+    (user_dir / "Film Grade.cube").write_text("LUT_3D_SIZE 33\n" + "".join(rgb_rows), encoding="utf-8")
     (user_dir / "broken.cube").write_text("LUT_3D_SIZE 33\n0 0 0\n")
     static_dir = root / "static"
     (static_dir / "assets").mkdir(parents=True)
@@ -122,24 +120,20 @@ def test_health_static_spa_and_cors(client):
     assert preflight.headers["access-control-allow-origin"] == "*"
 
 
-def test_builtin_and_mounted_luts(client, settings):
+def test_mounted_luts_list_and_raw_download(client, settings):
     response = client.get("/api/luts")
     assert response.status_code == 200
     items = response.json()["luts"]
-    assert {item["id"] for item in items if item["source"] == "builtin"} == BUILTINS
-    assert [item for item in items if item["source"] == "user"] == [{
+    assert items == [{
         "id": "user_Film_Grade", "name": "Film Grade", "description": "挂载目录 LUT",
         "source": "user", "size": 33, "raw_url": "/api/luts/user_Film_Grade/raw",
     }]
-    for lut_id, path in (
-        ("VLog_to_V709", settings.luts_dir / "VLog_to_V709.cube"),
-        ("user_Film_Grade", settings.luts_dir / "user" / "Film Grade.cube"),
-    ):
-        raw = client.get(f"/api/luts/{lut_id}/raw")
-        assert raw.status_code == 200
-        assert raw.headers["content-type"] == "text/plain; charset=utf-8"
-        assert raw.headers["cache-control"] == "public, max-age=3600"
-        assert raw.content == path.read_bytes()
+    raw = client.get(items[0]["raw_url"])
+    assert raw.status_code == 200
+    assert raw.headers["content-type"] == "text/plain; charset=utf-8"
+    assert raw.headers["cache-control"] == "public, max-age=3600"
+    assert raw.content == (settings.luts_dir / "user" / "Film Grade.cube").read_bytes()
+    assert client.get("/api/luts/VLog_to_V709/raw").status_code == 404
     assert client.get("/api/luts/user_broken/raw").status_code == 404
 
 
@@ -196,33 +190,53 @@ def test_upload_progress_proxy_range_and_thumbnails(client, session, tmp_path):
     assert client.get(base + "/thumbnails/9999.jpg").status_code == 404
 
 
-def test_custom_lut_upload_and_validation(client, session, settings):
-    info, base, _ = session
-    lut_bytes = (settings.luts_dir / "VLog_to_V709.cube").read_bytes()
-    response = client.post(base + "/lut/upload", files={"file": ("Custom.CUBE", lut_bytes)})
-    assert response.status_code == 200, response.text
-    data = response.json()
-    url = f"/api/luts/{data['lut_id']}/raw?session_id={info['session_id']}"
-    assert data == {
-        "lut_id": data["lut_id"], "name": "Custom.CUBE", "size": 33, "valid": True, "raw_url": url,
-    }
-    assert data["lut_id"].startswith("custom_")
-    assert client.get(url).content == lut_bytes
-    assert client.get(url.split("?")[0]).status_code == 404
-    luts = client.get("/api/luts", params={"session_id": info["session_id"]}).json()["luts"]
-    assert [item for item in luts if item["source"] == "custom"] == [{
-        "id": data["lut_id"], "name": "Custom.CUBE", "description": "用户上传",
-        "source": "custom", "size": 33, "raw_url": url,
-    }]
+def test_uploaded_luts_survive_video_changes_and_app_restart(client, settings):
+    manager = client.app.state.sessions
+    with manager.new_workspace("first.mp4", ".mp4") as first:
+        manager.register(first)
+    base = f"/api/session/{first.session_id}"
+    lut_bytes = (settings.luts_dir / "user" / "Film Grade.cube").read_bytes()
+    original_luts = client.get("/api/luts").json()["luts"]
+    uploaded = {}
+    for endpoint, contents in (
+        (base + "/lut/upload", lut_bytes),
+        ("/api/luts/upload", b"# Another grade with the same filename\n" + lut_bytes),
+    ):
+        response = client.post(endpoint, files={"file": ("Custom.CUBE", contents)})
+        assert response.status_code == 200, response.text
+        item = response.json()
+        assert item["name"] == "Custom.CUBE"
+        assert item["size"] == 33
+        assert item["valid"] is True
+        assert item["lut_id"] not in uploaded
+        uploaded[item["lut_id"]] = contents
+        assert client.get(item["raw_url"]).content == contents
 
     for filename, contents in (
         ("wrong.txt", lut_bytes), ("wrong_size.cube", b"LUT_3D_SIZE 17\n"),
         ("incomplete.cube", b"LUT_3D_SIZE 33\n0 0 0\n"),
     ):
-        invalid = client.post(base + "/lut/upload", files={"file": (filename, contents)})
+        invalid = client.post("/api/luts/upload", files={"file": (filename, contents)})
         assert invalid.status_code == 400
         assert "detail" in invalid.json()
-    assert len(list((settings.workspace_dir / info["session_id"] / "custom_luts").iterdir())) == 1
+    assert client.delete(base).json() == {"deleted": True}
+    assert not first.work_dir.exists()
+    with manager.new_workspace("second.mp4", ".mp4") as second:
+        manager.register(second)
+
+    def verify_library(http, params=None):
+        items = http.get("/api/luts", params=params).json()["luts"]
+        assert len(items) == len(original_luts) + len(uploaded)
+        for item in items:
+            if item["id"] in uploaded:
+                assert item["name"] == "Custom.CUBE"
+                assert http.get(item["raw_url"]).content == uploaded[item["id"]]
+        assert uploaded.keys() <= {item["id"] for item in items}
+
+    verify_library(client, {"session_id": second.session_id})
+    with TestClient(create_app(settings)) as restarted:
+        verify_library(restarted)
+    assert client.delete(f"/api/session/{second.session_id}").json() == {"deleted": True}
 
 
 def test_preview_frames_with_grading_and_unique_outputs(client, session, settings):
@@ -298,6 +312,18 @@ def test_samsung_export_has_valid_samsung_footer_and_embedded_mp4(client, sessio
     assert b'GCamera:MotionPhotoPresentationTimestampUs="250000"' in jpeg
     with Image.open(BytesIO(jpeg)) as cover:
         assert cover.size == (1152, 2048)
+    video = samsung_embedded_video(jpeg)
+    assert video[4:12] == b"ftypmp42"
+    mp4 = tmp_path / "embedded.mp4"
+    mp4.write_bytes(video)
+    data = probe(mp4)
+    assert data["format"]["tags"]["major_brand"] == "mp42"
+    video_stream, audio_stream = data["streams"]
+    assert (video_stream["width"], video_stream["height"]) == (1080, 1920)
+    assert audio_stream["codec_type"] == "audio"
+
+
+def samsung_embedded_video(jpeg: bytes) -> bytes:
     assert jpeg.endswith(b"SEFT")
     index = len(jpeg) - 8 - struct.unpack_from("<I", jpeg, len(jpeg) - 8)[0]
     assert struct.unpack_from("<4sII", jpeg, index) == (b"SEFH", 107, 3)
@@ -309,22 +335,57 @@ def test_samsung_export_has_valid_samsung_footer_and_embedded_mp4(client, sessio
     name_start = block + 8
     video_start = name_start + name_size
     assert jpeg[name_start:video_start] == b"MotionPhoto_Data"
-    video = jpeg[video_start:index]
-    assert video[4:12] == b"ftypmp42"
-    mp4 = tmp_path / "embedded.mp4"
-    mp4.write_bytes(video)
-    data = probe(mp4)
-    assert data["format"]["tags"]["major_brand"] == "mp42"
-    video_stream, audio_stream = data["streams"]
-    assert (video_stream["width"], video_stream["height"]) == (1080, 1920)
-    assert audio_stream["codec_type"] == "audio"
+    return jpeg[video_start:index]
+
+
+def test_long_video_selection_previews_and_exports_at_full_length(client, tmp_path):
+    source = tmp_path / "long.mp4"
+    subprocess.run([
+        "ffmpeg", "-v", "error", "-nostdin", "-y",
+        "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30",
+        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+        "-t", "11", "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", str(source),
+    ], check=True)
+    info = upload(client, source)
+    base = f"/api/session/{info['session_id']}"
+    assert status_events(client.get(base + "/events"))[-1]["status"] == "ready"
+    out_point = info["duration"]
+    assert out_point == 11.0
+
+    def assert_clip(path, contents, duration):
+        path.write_bytes(contents)
+        video, audio = probe(path)["streams"]
+        assert video["codec_type"] == "video"
+        assert audio["codec_type"] == "audio"
+        assert float(video["duration"]) == pytest.approx(duration, abs=0.04)
+
+    for duration in (5, 10):
+        in_point = out_point - duration
+        selection = {"in_point": in_point, "out_point": out_point}
+        preview = client.post(base + "/preview-clip", json=selection)
+        assert preview.status_code == 200, preview.text
+        assert_clip(tmp_path / "preview.mp4", preview.content, duration)
+        request = {**selection, "cover_time": in_point + duration / 2}
+
+        apple = client.post(base + "/export", json={**request, "format": "apple"})
+        assert apple.status_code == 200, apple.text
+        with ZipFile(BytesIO(apple.content)) as archive:
+            assert_clip(tmp_path / "apple.mov", archive.read("IMG_0001.mov"), duration)
+
+        samsung = client.post(base + "/export", json={**request, "format": "samsung"})
+        assert samsung.status_code == 200, samsung.text
+        embedded = samsung_embedded_video(samsung.content)
+        assert_clip(tmp_path / "samsung.mp4", embedded, duration)
+
+    assert client.delete(base).json() == {"deleted": True}
 
 
 @pytest.mark.parametrize(("endpoint", "body"), [
-    ("preview-clip", {"in_point": 0, "out_point": 3.01}),
+    ("preview-clip", {"in_point": -0.25, "out_point": 3}),
     ("preview-clip", {"in_point": 1, "out_point": 1}),
     ("preview-clip", {"in_point": 0, "out_point": "invalid"}),
-    ("export", {"in_point": 0, "out_point": 4, "cover_time": 1}),
+    ("preview-clip", {"in_point": 0, "out_point": 4.25}),
+    ("export", {"in_point": 0, "out_point": 4.25, "cover_time": 1}),
     ("export", {"in_point": 0, "out_point": 2, "cover_time": 2.1}),
     ("export", {"in_point": 0, "out_point": 1, "cover_time": 0, "format": "invalid"}),
 ])

@@ -29,9 +29,9 @@ def _clip_duration(body: PreviewClipRequest, video_duration: float) -> float:
     return float(Decimal(str(body.out_point)) - Decimal(str(body.in_point)))
 
 
-def _grade(body: GradeRequest, service: LutService, session: Session) -> dict:
+def _grade(body: GradeRequest, service: LutService) -> dict:
     return {
-        "lut_path": service.resolve(body.lut_id, session),
+        "lut_path": service.resolve(body.lut_id),
         "intensity": body.lut_intensity,
         "adjustments": body.adjustments.model_dump() if body.adjustments is not None else None,
     }
@@ -43,7 +43,7 @@ def preview_frame(
     session: SessionDep, service: LutServiceDep,
     body: PreviewFrameRequest = Body(default_factory=PreviewFrameRequest),
 ) -> Response:
-    grade = _grade(body, service, session)
+    grade = _grade(body, service)
     with tempfile.TemporaryDirectory(prefix="frame-", dir=session.output_dir) as directory:
         path = Path(directory) / "preview.jpg"
         try:
@@ -64,7 +64,7 @@ def preview_clip(
     session: SessionDep, service: LutServiceDep, body: PreviewClipRequest
 ) -> FileResponse:
     duration = _clip_duration(body, session.video.duration)
-    grade = _grade(body, service, session)
+    grade = _grade(body, service)
     directory = Path(tempfile.mkdtemp(prefix="clip-", dir=session.output_dir))
     path = directory / "preview.mp4"
     try:
@@ -88,7 +88,7 @@ def preview_clip(
 def _render_export(
     session: Session, service: LutService, body: ExportRequest, duration: float, directory: Path
 ) -> tuple[Path, str]:
-    grade = _grade(body, service, session)
+    grade = _grade(body, service)
     name = re.sub(r"[^a-zA-Z0-9_-]", "", body.output_name)[:120] or "IMG_0001"
     samsung = body.format == "samsung"
     if samsung and not name.startswith("MV"):

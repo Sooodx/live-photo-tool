@@ -64,7 +64,6 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .secondary:hover:not(:disabled), .small-button:hover:not(:disabled) { border-color: #53628b; background: #282d3b; }
 .small-button { padding: 5px 8px; min-height: 28px; font-size: 11px; }
 .small-button[aria-pressed="true"], .icon-button[aria-pressed="true"] { background: #303b5e; color: var(--accent-strong); }
-.small-button.warning { color: var(--danger); background: #38242e; border-color: #643a4c; }
 .text-button { color: var(--muted); padding: 5px 0 5px 5px; font-size: 11px; }
 .text-button:hover { color: var(--accent); }
 .icon-button { display: inline-grid; place-items: center; width: 34px; height: 33px; color: var(--muted); }
@@ -208,7 +207,6 @@ input[type="range"] { accent-color: var(--accent); cursor: pointer; }
 .selection-body { position: absolute; inset: auto 0 0; height: 15px; border-radius: 0 0 4px 4px; background: #344977; pointer-events: auto; cursor: grab; text-align: center; }
 .selection-body:active { cursor: grabbing; }
 .selection-duration { display: inline-block; vertical-align: top; max-width: 100%; overflow: hidden; height: 15px; color: #eef2ff; font: 10px/15px var(--mono); white-space: nowrap; }
-.selection-duration.over-limit { color: #ffe4e6; background: #783544; border-radius: 3px; padding: 0 3px; }
 .trim-handle { position: absolute; top: 0; bottom: 0; z-index: 2; width: 10px; border-radius: 4px; background: #9bb2fc; pointer-events: auto; cursor: ew-resize; }
 .trim-handle::after { content: ""; position: absolute; inset: 50% 3px auto; height: 13px; translate: 0 -50%; border-left: 1px solid #293862; border-right: 1px solid #293862; }
 .trim-in { left: 0; }
@@ -256,10 +254,8 @@ kbd { background: #252936; border: 1px solid #3a4051; border-radius: 4px; color:
 .summary-range { display: flex; align-items: center; gap: 6px; color: var(--text); font: 11px var(--mono); white-space: nowrap; }
 .summary-range > svg { color: var(--dim); }
 .duration-label { padding: 3px 5px; border-radius: 5px; background: #2b3553; color: var(--accent-strong); white-space: nowrap; }
-.duration-label.over-limit { background: #482832; color: var(--danger); }
 .summary-cover { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--muted); }
 .summary-cover > span:first-child { color: var(--cover); font-family: var(--mono); }
-.limit-note { display: flex; align-items: center; gap: 4px; color: var(--danger); margin-left: 3px; }
 .export-format p { color: var(--dim); font-size: 10px; margin: 4px 0 0 3px; }
 .format-toggle button { font-size: 11px; }
 .export-form { display: flex; align-items: flex-end; gap: 7px; }

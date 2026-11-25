@@ -12,7 +12,7 @@ from typing import BinaryIO, Iterator
 from urllib.parse import quote
 
 from app.schemas import LutItem, LutUploadResponse
-from app.services.session_manager import Session, copy_upload
+from app.services.session_manager import copy_upload
 
 _UPLOAD_ID = re.compile(r"custom_[0-9a-f]{32}")
 _TITLE = re.compile(r'TITLE\s+"[^"]*"\s*(?:#.*)?', re.IGNORECASE)
@@ -148,7 +148,7 @@ class LutService:
                     items.append(uploaded[0])
         return items
 
-    def resolve(self, lut_id: str | None, _session: Session | None = None) -> Path | None:
+    def resolve(self, lut_id: str | None) -> Path | None:
         if not lut_id:
             return None
         if lut_id.startswith("user_"):
