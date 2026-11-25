@@ -7,7 +7,7 @@ services:
       - "8080:8080"
     volumes:
       - ./workspace:/app/workspace
-      # 可选：把自己的 .cube 放进 ./my-luts，刷新页面后即可使用
+      # 持久化网页导入的 LUT，也可直接把 .cube 放入 ./my-luts
       - ./my-luts:/app/luts/user
     environment:
       - MAX_UPLOAD_SIZE_GB=4

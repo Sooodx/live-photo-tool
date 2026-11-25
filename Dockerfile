@@ -29,9 +29,8 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
 RUN uv sync --frozen --no-install-project --no-dev
 
-# 拷贝后端代码与内置 LUT
+# 拷贝后端代码与前端构建产物
 COPY backend/app/ /app/app/
-COPY backend/luts/ /app/luts/
 COPY --from=frontend-builder /frontend/dist /app/static
 
 # 创建运行所需目录

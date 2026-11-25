@@ -79,26 +79,12 @@ export function useLuts(sessionId: string, notify: (message: string, isError?: b
     const loader = createLutLoader(signal)
     context.current = { signal, loader }
 
-    void getLuts(sessionId, signal).then(async ({ luts }) => {
+    void getLuts(signal).then(({ luts }) => {
       if (signal.aborted) return
-      setList(luts)
-      // Bound background preloading when a mounted directory holds many LUTs.
-      // Each sample takes 16 float bytes and 4 normalized byte channels.
-      let budget = 32 * 1024 * 1024
-      const presets = luts.filter(entry => {
-        const bytes = entry.size ** 3 * 20
-        if (bytes > budget) return false
-        budget -= bytes
-        return true
+      setList(previous => {
+        const ids = new Set(luts.map(lut => lut.id))
+        return [...luts, ...previous.filter(lut => !ids.has(lut.id))]
       })
-      let next = 0
-      const warm = async () => {
-        while (!signal.aborted && next < presets.length) {
-          const entry = presets[next++]
-          await loader.load(entry.raw_url).catch(() => undefined)
-        }
-      }
-      await Promise.all([warm(), warm()])
     }).catch(error => {
       if (!signal.aborted) notify(error instanceof Error ? error.message : '无法加载 LUT 列表', true)
     })
@@ -147,7 +133,7 @@ export function useLuts(sessionId: string, notify: (message: string, isError?: b
     try {
       const lut = await current.loader.parse(await file.text())
       if (current.signal.aborted) return
-      const result = await uploadLut(sessionId, file, current.signal)
+      const result = await uploadLut(file, current.signal)
       if (current.signal.aborted) return
       const entry: LutInfo = {
         id: result.lut_id,
@@ -155,12 +141,12 @@ export function useLuts(sessionId: string, notify: (message: string, isError?: b
         size: result.size,
         raw_url: result.raw_url,
         source: 'custom',
-        description: '会话自定义 LUT',
+        description: '用户上传',
       }
       current.loader.remember(entry.raw_url, lut)
-      setList(previous => [...previous, entry])
+      setList(previous => previous.some(lut => lut.id === entry.id) ? previous : [...previous, entry])
       if (generation.current === revision) await select(entry.id, entry)
-      notify('自定义 LUT 已上传')
+      notify('LUT 已保存到「我的 LUT」')
     } catch (error) {
       if (!current.signal.aborted) notify(error instanceof Error ? error.message : 'LUT 上传失败', true)
     } finally {

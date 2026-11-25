@@ -37,7 +37,7 @@ export interface LutInfo {
   id: string
   name: string
   description: string
-  source: 'builtin' | 'user' | 'custom'
+  source: 'user' | 'custom'
   size: number
   raw_url: string
 }
@@ -222,16 +222,16 @@ export function waitForSession(id: string, onStatus: (status: SessionStatus) => 
 export const getThumbnails = (id: string, signal: AbortSignal) =>
   json<ThumbnailList>(`${sessionPath(id)}/thumbnails`, { signal })
 
-export const getLuts = (id: string, signal: AbortSignal) =>
-  json<{ luts: LutInfo[] }>(`/api/luts?session_id=${encodeURIComponent(id)}`, { signal })
+export const getLuts = (signal: AbortSignal) =>
+  json<{ luts: LutInfo[] }>('/api/luts', { signal })
 
 export const getRawLut = (url: string, signal: AbortSignal) =>
   request(url, { signal }).then(response => response.text())
 
-export function uploadLut(id: string, file: File, signal: AbortSignal) {
+export function uploadLut(file: File, signal: AbortSignal) {
   const body = new FormData()
   body.append('file', file)
-  return json<UploadedLut>(`${sessionPath(id)}/lut/upload`, { method: 'POST', body, signal })
+  return json<UploadedLut>('/api/luts/upload', { method: 'POST', body, signal })
 }
 
 export const previewFrame = (id: string, body: ColorPayload & { time: number }, signal?: AbortSignal) =>

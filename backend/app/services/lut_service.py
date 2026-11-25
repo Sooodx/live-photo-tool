@@ -1,55 +1,40 @@
-"""Catalog, validation and storage for built-in, mounted and uploaded LUTs."""
+"""Catalog, validation and persistent storage for user LUTs."""
 
-import math
+import errno
+import os
 import re
+import stat
+import tempfile
 import uuid
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import BinaryIO, Iterator
 from urllib.parse import quote
 
 from app.schemas import LutItem, LutUploadResponse
 from app.services.session_manager import Session, copy_upload
 
-BUILTIN_LUTS = [
-    {
-        "id": "VLog_to_V709",
-        "name": "V-Log → V-709",
-        "description": "Panasonic V-Log 转 Rec.709，标准还原",
-    },
-    {
-        "id": "VLog_to_V709_Warm",
-        "name": "V-Log → V-709 Warm",
-        "description": "暖调版本，色温偏橙",
-    },
-    {
-        "id": "VLog_to_V709_Cool",
-        "name": "V-Log → V-709 Cool",
-        "description": "冷调版本，色温偏蓝",
-    },
-    {
-        "id": "SLog3_to_S709",
-        "name": "S-Log3 → S-709",
-        "description": "Sony S-Log3 转 Rec.709",
-    },
-    {
-        "id": "SLog2_to_S709",
-        "name": "S-Log2 → S-709",
-        "description": "Sony S-Log2 转 Rec.709",
-    },
-    {
-        "id": "LogC_to_Rec709",
-        "name": "Log-C → Rec.709",
-        "description": "ARRI Log-C 转 Rec.709",
-    },
-]
-_BUILTIN_IDS = {item["id"] for item in BUILTIN_LUTS}
+_UPLOAD_ID = re.compile(r"custom_[0-9a-f]{32}")
+_TITLE = re.compile(r'TITLE\s+"[^"]*"\s*(?:#.*)?', re.IGNORECASE)
+_DECIMAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+_MAX_FLOAT32 = float.fromhex("0x1.fffffep+127")
 
 
-def read_cube_size(path: Path, *, validate: bool = True) -> int | None:
-    """Read the declared 3D size and, for user files, verify the entire table."""
+def _cube_value(token: str) -> float:
+    if not _DECIMAL.fullmatch(token):
+        raise ValueError("Invalid cube value")
+    value = float(token)
+    if abs(value) > _MAX_FLOAT32:
+        raise ValueError("Cube value out of range")
+    return value
+
+
+def read_cube_size(path: Path) -> int | None:
+    """Read the declared 3D size and verify the entire table."""
     size = None
     rows = 0
+    title_seen = False
+    domains: dict[str, tuple[float, ...]] = {}
     try:
         with path.open(encoding="utf-8-sig") as source:
             for line in source:
@@ -62,58 +47,74 @@ def read_cube_size(path: Path, *, validate: bool = True) -> int | None:
                     if size is not None or values not in (["33"], ["65"]):
                         return None
                     size = int(values[0])
-                    if not validate:
-                        return size
-                elif command == "TITLE" and not rows:
-                    continue
-                elif command in {"DOMAIN_MIN", "DOMAIN_MAX", "LUT_3D_INPUT_RANGE"} and not rows:
-                    expected = 2 if command == "LUT_3D_INPUT_RANGE" else 3
-                    if len(values) != expected or not all(math.isfinite(float(v)) for v in values):
+                elif command == "TITLE":
+                    if rows or title_seen or not _TITLE.fullmatch(line.strip()):
                         return None
+                    title_seen = True
+                elif command in {"DOMAIN_MIN", "DOMAIN_MAX", "LUT_3D_INPUT_RANGE"}:
+                    expected = 2 if command == "LUT_3D_INPUT_RANGE" else 3
+                    if rows or command in domains or len(values) != expected:
+                        return None
+                    domains[command] = tuple(_cube_value(value) for value in values)
                 else:
                     if size is None or len(tokens) != 3 or rows >= size**3:
                         return None
-                    if not all(math.isfinite(float(value)) for value in tokens):
-                        return None
+                    for token in tokens:
+                        _cube_value(token)
                     rows += 1
     except (OSError, ValueError):
+        return None
+    domain_min = domains.get("DOMAIN_MIN", (0, 0, 0))
+    domain_max = domains.get("DOMAIN_MAX", (1, 1, 1))
+    if any(low >= high for low, high in zip(domain_min, domain_max)):
+        return None
+    input_range = domains.get("LUT_3D_INPUT_RANGE")
+    if input_range is not None and input_range[0] >= input_range[1]:
         return None
     return size if size is not None and rows == size**3 else None
 
 
 @lru_cache(maxsize=128)
-def _mounted_size(path: Path, modified: int, changed: int, size: int) -> int | None:
-    # File metadata invalidates validation when a mounted LUT is edited or replaced.
+def _cached_cube_size(path: Path, modified: int, changed: int, size: int) -> int | None:
+    # File metadata invalidates validation when a library LUT is edited or replaced.
     return read_cube_size(path)
 
 
-def raw_url(lut_id: str, session_id: str | None = None) -> str:
-    path = f"/api/luts/{quote(lut_id, safe='')}/raw"
-    return f"{path}?session_id={quote(session_id, safe='')}" if session_id else path
+def _cube_files(directory: Path) -> Iterator[tuple[Path, Path, int]]:
+    directory = directory.resolve()
+    try:
+        files = sorted(directory.iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        return
+    for file in files:
+        if file.suffix.lower() != ".cube":
+            continue
+        try:
+            file.name.encode("utf-8")
+            path = file.resolve(strict=True)
+            if not path.is_relative_to(directory):
+                continue
+            metadata = path.stat()
+        except (OSError, RuntimeError, UnicodeError):
+            continue
+        if stat.S_ISREG(metadata.st_mode):
+            size = _cached_cube_size(path, metadata.st_mtime_ns, metadata.st_ctime_ns, metadata.st_size)
+            if size is not None:
+                yield file, path, size
+
+
+def raw_url(lut_id: str) -> str:
+    return f"/api/luts/{quote(lut_id, safe='')}/raw"
 
 
 class LutService:
     def __init__(self, luts_dir: Path) -> None:
-        self.luts_dir = luts_dir
+        self.user_dir = luts_dir / "user"
+        self.uploads_dir = self.user_dir / "uploads"
 
-    def user_luts(self) -> Iterator[tuple[LutItem, Path]]:
-        directory = (self.luts_dir / "user").resolve()
-        if not directory.is_dir():
-            return
+    def _mounted_luts(self) -> Iterator[tuple[LutItem, Path]]:
         ids: set[str] = set()
-        for file in sorted(directory.iterdir()):
-            if file.suffix.lower() != ".cube" or not file.is_file():
-                continue
-            path = file.resolve()
-            if not path.is_relative_to(directory):
-                continue
-            try:
-                stat = path.stat()
-            except FileNotFoundError:
-                continue
-            size = _mounted_size(path, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
-            if size is None:
-                continue
+        for file, path, size in _cube_files(self.user_dir):
             stem = re.sub(r"[^\w-]+", "_", file.stem).strip("_") or "lut"
             base_id = f"user_{stem}"
             lut_id = base_id
@@ -127,48 +128,74 @@ class LutService:
                 source="user", size=size, raw_url=raw_url(lut_id),
             ), path
 
-    def list(self, session: Session | None) -> list[LutItem]:
-        items = []
-        for meta in BUILTIN_LUTS:
-            lut_id = meta["id"]
-            size = read_cube_size(self.luts_dir / f"{lut_id}.cube", validate=False)
-            if size is not None:
-                items.append(LutItem(**meta, source="builtin", size=size, raw_url=raw_url(lut_id)))
-        items.extend(item for item, _ in self.user_luts())
-        if session is not None:
-            items.extend(session.custom_luts())
-        return items
-
-    def resolve(self, lut_id: str | None, session: Session | None) -> Path | None:
-        if not lut_id:
+    def _uploaded_lut(self, entry: Path) -> tuple[LutItem, Path] | None:
+        lut_id = entry.name
+        if not _UPLOAD_ID.fullmatch(lut_id) or entry.is_symlink():
             return None
-        if lut_id in _BUILTIN_IDS:
-            path = self.luts_dir / f"{lut_id}.cube"
-            return path if path.is_file() else None
-        if lut_id.startswith("user_"):
-            return next((path for item, path in self.user_luts() if item.id == lut_id), None)
-        if session is not None:
-            path = session.custom_lut_path(lut_id)
-            if path is not None and path.is_file():
-                return path
+        for file, path, size in _cube_files(entry):
+            return LutItem(
+                id=lut_id, name=file.name, description="用户上传",
+                source="custom", size=size, raw_url=raw_url(lut_id),
+            ), path
         return None
 
-    def upload(
-        self, session: Session, filename: str, source: BinaryIO, max_bytes: int
-    ) -> LutUploadResponse:
-        lut_id = f"custom_{uuid.uuid4().hex}"
-        path = session.custom_luts_dir / f"{lut_id}.cube"
-        try:
-            copy_upload(source, path, max_bytes)
+    def list(self) -> list[LutItem]:
+        items = [item for item, _ in self._mounted_luts()]
+        if not self.uploads_dir.is_symlink() and self.uploads_dir.is_dir():
+            for entry in sorted(self.uploads_dir.iterdir()):
+                uploaded = self._uploaded_lut(entry)
+                if uploaded is not None:
+                    items.append(uploaded[0])
+        return items
+
+    def resolve(self, lut_id: str | None, _session: Session | None = None) -> Path | None:
+        if not lut_id:
+            return None
+        if lut_id.startswith("user_"):
+            return next((path for item, path in self._mounted_luts() if item.id == lut_id), None)
+        if _UPLOAD_ID.fullmatch(lut_id) and not self.uploads_dir.is_symlink():
+            uploaded = self._uploaded_lut(self.uploads_dir / lut_id)
+            if uploaded is not None:
+                return uploaded[1]
+        return None
+
+    def upload(self, filename: str, source: BinaryIO, max_bytes: int) -> LutUploadResponse:
+        if Path(filename).suffix.lower() != ".cube":
+            raise ValueError("仅支持 .cube 文件")
+        if PureWindowsPath(filename).is_reserved() or any(
+            char in '/\\:*?"<>|' or ord(char) < 32 for char in filename
+        ):
+            raise ValueError("LUT 文件名无效")
+        if self.uploads_dir.is_symlink():
+            raise OSError("LUT uploads directory must not be a symlink")
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
+
+        with tempfile.TemporaryDirectory(prefix=".upload-", dir=self.uploads_dir) as temporary:
+            entry = Path(temporary) / "lut"
+            entry.mkdir()
+            path = entry / filename
+            try:
+                copy_upload(source, path, max_bytes)
+            except OSError as exc:
+                if exc.errno in (errno.ENAMETOOLONG, errno.EINVAL):
+                    raise ValueError("LUT 文件名无效或过长") from exc
+                raise
             size = read_cube_size(path)
             if size is None:
                 raise ValueError("不是有效的 .cube 文件，或 LUT size 不支持（仅 33 / 65 点）")
-        except BaseException:
-            path.unlink(missing_ok=True)
-            raise
-        url = raw_url(lut_id, session.session_id)
-        session.add_lut(LutItem(
-            id=lut_id, name=filename, description="用户上传", source="custom",
-            size=size, raw_url=url,
-        ))
-        return LutUploadResponse(lut_id=lut_id, name=filename, size=size, raw_url=url)
+
+            # Rename the complete entry on the same filesystem. An existing LUT's
+            # directory is nonempty, so a concurrent rename cannot replace it.
+            while True:
+                lut_id = f"custom_{uuid.uuid4().hex}"
+                destination = self.uploads_dir / lut_id
+                if os.path.lexists(destination):
+                    continue
+                try:
+                    entry.rename(destination)
+                except OSError as exc:
+                    if exc.errno not in (errno.EEXIST, errno.ENOTEMPTY):
+                        raise
+                else:
+                    break
+        return LutUploadResponse(lut_id=lut_id, name=filename, size=size, raw_url=raw_url(lut_id))

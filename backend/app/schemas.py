@@ -51,7 +51,7 @@ class LutItem(BaseModel):
     id: str
     name: str
     description: str
-    source: Literal["builtin", "user", "custom"]
+    source: Literal["user", "custom"]
     size: int
     raw_url: str
 

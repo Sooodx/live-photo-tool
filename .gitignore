@@ -14,6 +14,9 @@ backend/workspace/
 backend/uploads/
 workspace/
 uploads/
+
+# 用户 LUT 库
+backend/luts/user/
 my-luts/
 
 # 会话临时输出

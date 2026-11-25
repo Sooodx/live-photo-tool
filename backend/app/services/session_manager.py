@@ -10,7 +10,7 @@ from threading import Lock
 from typing import BinaryIO, Iterator
 
 from app.config import UPLOAD_CHUNK_SIZE, Settings
-from app.schemas import LutItem, SessionStatus, VideoMetadata
+from app.schemas import SessionStatus, VideoMetadata
 
 
 class UploadTooLarge(Exception):
@@ -38,7 +38,6 @@ class Session:
     leases: int = 0
     deleted: bool = False
     _statuses: list[SessionStatus] = field(init=False)
-    _custom_luts: dict[str, LutItem] = field(default_factory=dict)
     _lock: Lock = field(default_factory=Lock)
 
     def __post_init__(self) -> None:
@@ -55,10 +54,6 @@ class Session:
     @property
     def thumbnails_dir(self) -> Path:
         return self.work_dir / "thumbnails"
-
-    @property
-    def custom_luts_dir(self) -> Path:
-        return self.work_dir / "custom_luts"
 
     @property
     def output_dir(self) -> Path:
@@ -84,20 +79,6 @@ class Session:
             if status != previous:
                 self._statuses.append(status)
 
-    def add_lut(self, item: LutItem) -> None:
-        with self._lock:
-            self._custom_luts[item.id] = item
-
-    def custom_luts(self) -> list[LutItem]:
-        with self._lock:
-            return list(self._custom_luts.values())
-
-    def custom_lut_path(self, lut_id: str) -> Path | None:
-        with self._lock:
-            if lut_id in self._custom_luts:
-                return self.custom_luts_dir / f"{lut_id}.cube"
-        return None
-
 
 class SessionManager:
     def __init__(self, settings: Settings) -> None:
@@ -111,7 +92,6 @@ class SessionManager:
         session = Session(session_id, self._settings.workspace_dir / session_id, filename, source_ext)
         session.work_dir.mkdir()
         try:
-            session.custom_luts_dir.mkdir()
             session.output_dir.mkdir()
             yield session
         except BaseException:

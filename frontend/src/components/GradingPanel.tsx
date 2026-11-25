@@ -20,12 +20,6 @@ interface GradingProps {
   onReset: () => void
 }
 
-const groups = [
-  { label: '内置', source: 'builtin' },
-  { label: '挂载目录', source: 'user' },
-  { label: '自定义', source: 'custom' },
-] as const
-
 const zones = [
   { name: '高光', key: 'highlights' },
   { name: '阴影', key: 'shadows' },
@@ -103,12 +97,9 @@ export const GradingPanel = memo(function GradingPanel(props: GradingProps) {
         <div className="select-wrap">
           <select aria-label="选择 LUT" value={props.selectedId} onChange={event => props.onSelect(event.currentTarget.value)}>
             <option value="">无 LUT（原片）</option>
-            {groups.map(group => {
-              const entries = props.luts.filter(lut => lut.source === group.source)
-              return entries.length > 0 && <optgroup key={group.source} label={group.label}>
-                {entries.map(lut => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
-              </optgroup>
-            })}
+            {props.luts.length > 0 && <optgroup label="我的 LUT">
+              {props.luts.map(lut => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
+            </optgroup>}
           </select>
           {props.lutLoading ? <LoaderCircle className="spin" size={15} /> : <ChevronDown size={15} />}
         </div>
