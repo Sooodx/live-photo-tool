@@ -1,9 +1,9 @@
 import { memo, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, KeyboardEvent, PointerEvent } from 'react'
-import { AudioLines, Diamond, Scissors, ZoomIn, ZoomOut } from 'lucide-react'
+import { AudioLines, Diamond, ZoomIn, ZoomOut } from 'lucide-react'
 import type { Thumbnail, ThumbnailList } from '../api'
 import type { VideoClock } from '../hooks/useVideoScrubber'
-import { clamp, isOverLimit, timecode } from '../model'
+import { clamp, timecode } from '../model'
 import type { Selection } from '../model'
 
 type DragMode = 'in' | 'out' | 'window' | 'cover' | 'scrub'
@@ -18,7 +18,6 @@ interface TimelineProps {
   onChange: (selection: Selection, seekTime: number) => void
   onScrub: (time: number) => void
   onDragStart: () => void
-  onShorten: () => void
 }
 
 function dragSelection(mode: Exclude<DragMode, 'scrub'>, time: number, delta: number,
@@ -39,7 +38,8 @@ function dragSelection(mode: Exclude<DragMode, 'scrub'>, time: number, delta: nu
     }
     case 'window': {
       const shift = clamp(delta, -inPoint, duration - outPoint)
-      const next = { inPoint: inPoint + shift, outPoint: outPoint + shift, coverTime: coverTime + shift }
+      const end = Math.min(outPoint + shift, duration)
+      const next = { inPoint: inPoint + shift, outPoint: end, coverTime: Math.min(coverTime + shift, end) }
       return { selection: next, seek: next.inPoint }
     }
   }
@@ -123,7 +123,7 @@ interface Drag {
 }
 
 export const Timeline = memo(function Timeline({
-  hidden, selection, thumbnails, duration, frameDuration, clock, onChange, onScrub, onDragStart, onShorten,
+  hidden, selection, thumbnails, duration, frameDuration, clock, onChange, onScrub, onDragStart,
 }: TimelineProps) {
   const root = useRef<HTMLDivElement>(null)
   const scroller = useRef<HTMLDivElement>(null)
@@ -255,13 +255,11 @@ export const Timeline = memo(function Timeline({
     })
   }
 
-  const over = isOverLimit(selection)
   return (
     <section className="timeline panel" aria-label="视频时间轴" hidden={hidden}>
       <header className="panel-heading timeline-heading">
         <h2><AudioLines size={16} /> 时间轴</h2>
         <div className="timeline-tools">
-          {over && <button className="small-button warning" onClick={onShorten}><Scissors size={13} /> 自动缩至 3.0s</button>}
           <label className="zoom-control">
             <ZoomOut size={15} aria-hidden="true" />
             <input aria-label="时间轴缩放" type="range" min={1} max={8} step={0.25} value={zoom}
@@ -282,7 +280,7 @@ export const Timeline = memo(function Timeline({
           <div className="clip-selection" style={{ left: percent(inPoint, duration), width: percent(outPoint - inPoint, duration) }}>
             <div className="selection-outline" />
             <div className="selection-body" data-drag="window" title="拖动移动选区">
-              <span className={over ? 'selection-duration over-limit' : 'selection-duration'}>
+              <span className="selection-duration">
                 {(outPoint - inPoint).toFixed(2)} s
               </span>
             </div>

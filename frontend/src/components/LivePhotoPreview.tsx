@@ -86,14 +86,13 @@ export function LivePhotoPreview(props: PreviewProps) {
   )
 }
 
-export function LivePhotoControls({ phase, exact, available, busy, validationDisabled, tooLong, playable,
+export function LivePhotoControls({ phase, exact, available, busy, validationDisabled, playable,
   onPlay, onStop, onValidate, onExact, audio }: {
   phase: LivePhase
   exact: boolean
   available: boolean
   busy: boolean
   validationDisabled: boolean
-  tooLong: boolean
   playable: boolean
   onPlay: () => void
   onStop: () => void
@@ -114,8 +113,7 @@ export function LivePhotoControls({ phase, exact, available, busy, validationDis
           <button aria-pressed={!exact} onClick={() => onExact(false)}><CircleDot size={13} /> 实时 GPU 预览</button>
           <button aria-pressed={exact} onClick={() => onExact(true)}>FFmpeg 精确渲染</button>
         </div>}
-        {!available && <button className="button secondary" disabled={validationDisabled || busy}
-          title={tooLong ? '选区须缩至 3.0 秒以内' : undefined} onClick={onValidate}>
+        {!available && <button className="button secondary" disabled={validationDisabled || busy} onClick={onValidate}>
           {busy ? <LoaderCircle className="spin" size={15} /> : <Clapperboard size={15} />}
           {busy ? '正在渲染…' : 'FFmpeg 精确校验'}
         </button>}

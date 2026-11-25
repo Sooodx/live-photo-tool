@@ -16,7 +16,7 @@ import { useHotkeys } from './hooks/useHotkeys'
 import { useLuts } from './hooks/useLuts'
 import { useVideoRenderer } from './hooks/useVideoRenderer'
 import { useVideoScrubber } from './hooks/useVideoScrubber'
-import { clamp, isOverLimit, MAX_CLIP_SECONDS, neutralAdjustments } from './model'
+import { clamp, isValidSelection, neutralAdjustments } from './model'
 import type { Adjustments, OutputFormat, Selection, WorkspaceMode } from './model'
 
 interface WorkspaceProps {
@@ -27,9 +27,11 @@ interface WorkspaceProps {
   notify: (message: string, isError?: boolean) => void
 }
 
+const INITIAL_SELECTION_SECONDS = 3
+
 export function Workspace({ info, thumbnails, resetting, onReset, notify }: WorkspaceProps) {
   const { session_id: id, duration, fps, has_audio: hasAudio } = info
-  const firstOut = Math.min(MAX_CLIP_SECONDS, duration)
+  const firstOut = Math.min(INITIAL_SELECTION_SECONDS, duration)
   const [selection, setSelection] = useState<Selection>({ inPoint: 0, outPoint: firstOut, coverTime: firstOut / 2 })
   const [mode, setMode] = useState<WorkspaceMode>('edit')
   const [adjustments, setAdjustments] = useState(neutralAdjustments)
@@ -43,6 +45,7 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   const [volume, setVolume] = useState(0.85)
   const [exporting, setExporting] = useState(false)
   const [phase, setPhase] = useState<LivePhase>('idle')
+  const [playingExact, setPlayingExact] = useState(false)
   const [coverReady, setCoverReady] = useState(false)
   const [exactProgress, setExactProgress] = useState(0)
 
@@ -73,12 +76,9 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   }), [luts.active, intensity, adjustments])
 
   const { inPoint, outPoint, coverTime } = selection
-  const range = useMemo(() => ({
-    in_point: Number(inPoint.toFixed(6)),
-    out_point: Number(outPoint.toFixed(6)),
-    cover_time: Number(coverTime.toFixed(6)),
-  }), [inPoint, outPoint, coverTime])
-  const tooLong = isOverLimit(selection)
+  const range = { in_point: inPoint, out_point: outPoint, cover_time: coverTime }
+  const validSelection = isValidSelection(selection, duration)
+  const exportDisabled = !validSelection || luts.loading || resetting
   const exact = useExactPreview(id, color, range, notify)
   const video = useVideoScrubber({
     duration,
@@ -87,6 +87,8 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
     onError: message => notify(message, true),
   })
   const { clock, ready, pause, seek, toggle, videoRef } = video
+  const showingExact = phase === 'idle' ? exact.enabled : playingExact
+  const playable = validSelection && !resetting && (showingExact || (ready && coverReady))
   const renderer = useVideoRenderer(videoRef, grade)
   drawFrame.current = () => renderer.draw(true)
   const { supported, capture } = renderer
@@ -94,7 +96,7 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   useEffect(() => {
     if (videoRef.current) videoRef.current.volume = volume
     if (exactVideo.current) exactVideo.current.volume = volume
-  }, [exact.enabled, mode, videoRef, volume])
+  }, [showingExact, mode, videoRef, volume])
 
   useEffect(() => () => exportRequest.current?.abort(), [])
 
@@ -111,14 +113,6 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
     setSelection(next)
     seek(time)
   }, [seek])
-
-  const shorten = useCallback(() => {
-    pause()
-    setSelection(previous => {
-      const end = Math.min(previous.outPoint, previous.inPoint + MAX_CLIP_SECONDS)
-      return { ...previous, outPoint: end, coverTime: Math.min(previous.coverTime, end) }
-    })
-  }, [pause])
 
   function markIn() {
     const time = clamp(clock.read(), 0, duration - frameDuration)
@@ -169,11 +163,12 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   }
 
   function playLive() {
-    if (!ready || !coverReady || livePhase.current !== 'idle') return
+    if (!playable || livePhase.current !== 'idle') return
+    const player = showingExact ? exactVideo.current : null
     livePhase.current = 'starting'
+    setPlayingExact(Boolean(player))
     setPhase('starting')
-    const player = exactVideo.current
-    if (exact.enabled && player) {
+    if (player) {
       player.currentTime = 0
       player.volume = volume
       void player.play().catch(error => {
@@ -218,7 +213,7 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
   } : null)
 
   async function download() {
-    if (exportRequest.current || tooLong || luts.loading || resetting) return
+    if (exportRequest.current || exportDisabled) return
     const controller = new AbortController()
     exportRequest.current = controller
     setExporting(true)
@@ -255,9 +250,9 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
     onVolume={next => { setVolume(next); setMuted(false) }} />
   const live = mode === 'live'
   const fallback = supported === false
-  const fallbackFrame = fallback && ready && !comparing && (live ? !exact.enabled : !video.playing)
+  const fallbackFrame = fallback && ready && !comparing && (live ? !showingExact : !video.playing)
     ? <FallbackFrame sessionId={id} clock={clock} lockedTime={live ? coverTime : undefined} color={color} /> : null
-  const exactMedia = live && exact.enabled && exact.clipUrl ? (
+  const exactMedia = live && showingExact && exact.clipUrl ? (
     <video ref={exactVideo} className={`exact-video ${phase === 'playing' ? 'is-animated' : ''}`}
       src={exact.clipUrl} playsInline preload="auto" muted={muted}
       onLoadedMetadata={event => { event.currentTarget.volume = volume }}
@@ -279,7 +274,8 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
       <main className={`workspace ${live ? 'workspace-live' : ''}`}>
         <div className="workspace-grid">
           <VideoViewport info={info} clock={clock} canvasRef={renderer.canvasRef}
-            ratio={ratio} live={live} animated={phase === 'playing'} fallback={fallback} comparing={!live && comparing} ready={ready}
+            ratio={ratio} live={live} animated={phase === 'playing'} fallback={fallback} comparing={!live && comparing}
+            ready={ready || (live && showingExact)}
             video={<video ref={videoRef} className="proxy-video" src={proxyUrl(id)}
               crossOrigin="anonymous" playsInline preload="auto" muted={muted}
               onLoadedMetadata={event => {
@@ -288,21 +284,21 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
               }} />}
             overlay={live ? (
               <LivePhotoPreview selection={selection} format={format} clock={clock} phase={phase}
-                coverRef={coverCanvas} coverReady={coverReady} exactCover={exact.enabled ? exact.coverUrl : undefined}
-                fallbackFrame={fallbackFrame} exactMedia={exactMedia} exactProgress={exact.enabled ? exactProgress : null}
-                playable={ready && coverReady} onPlay={playLive} onStop={stopLive} />
+                coverRef={coverCanvas} coverReady={coverReady} exactCover={showingExact ? exact.coverUrl : undefined}
+                fallbackFrame={fallbackFrame} exactMedia={exactMedia} exactProgress={showingExact ? exactProgress : null}
+                playable={playable} onPlay={playLive} onStop={stopLive} />
             ) : fallbackFrame}
             controls={live ? (
-              <LivePhotoControls phase={phase} exact={exact.enabled} available={exact.available} busy={exact.busy}
-                validationDisabled={tooLong || luts.loading || !ready || phase !== 'idle'} tooLong={tooLong}
-                playable={ready && coverReady} onPlay={playLive} onStop={stopLive}
+              <LivePhotoControls phase={phase} exact={showingExact} available={exact.available} busy={exact.busy}
+                validationDisabled={exportDisabled || phase !== 'idle'}
+                playable={playable} onPlay={playLive} onStop={stopLive}
                 onValidate={() => { void exact.validate() }} onExact={changeExact} audio={audio} />
             ) : (
               <EditingControls playing={video.playing} ready={ready} looping={looping} comparing={comparing}
                 onToggle={toggle} onLoop={() => setLooping(!looping)} onCompare={setComparing} onCover={markCover} audio={audio} />
             )} />
           <Timeline hidden={live} selection={selection} thumbnails={thumbnails} duration={duration} frameDuration={frameDuration}
-            clock={clock} onChange={updateSelection} onScrub={seek} onDragStart={pause} onShorten={shorten} />
+            clock={clock} onChange={updateSelection} onScrub={seek} onDragStart={pause} />
           {!live && (
             <GradingPanel luts={luts.list} selectedId={luts.requestedId} intensity={intensity} adjustments={adjustments}
               curve={curve} lutLoading={luts.loading} lutUploading={luts.uploading}
@@ -311,7 +307,7 @@ export function Workspace({ info, thumbnails, resetting, onReset, notify }: Work
           )}
         </div>
         <ExportBar selection={selection} format={format} name={name} exporting={exporting}
-          disabled={luts.loading || resetting} onFormat={setFormat} onName={setName} onExport={() => { void download() }} />
+          disabled={exportDisabled} onFormat={setFormat} onName={setName} onExport={() => { void download() }} />
       </main>
     </>
   )

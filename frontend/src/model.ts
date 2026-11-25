@@ -18,11 +18,11 @@ export interface Selection {
 export type OutputFormat = 'apple' | 'samsung'
 export type WorkspaceMode = 'edit' | 'live'
 
-export const MAX_CLIP_SECONDS = 3
 export const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
-export function isOverLimit(selection: Selection) {
-  return selection.outPoint - selection.inPoint > MAX_CLIP_SECONDS + 1e-7
+export function isValidSelection({ inPoint, outPoint, coverTime }: Selection, duration: number) {
+  return Number.isFinite(duration) && 0 <= inPoint && inPoint < outPoint && outPoint <= duration &&
+    inPoint <= coverTime && coverTime <= outPoint
 }
 
 export function timecode(seconds: number) {

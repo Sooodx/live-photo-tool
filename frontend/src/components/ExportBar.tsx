@@ -1,6 +1,6 @@
-import { AlertTriangle, Apple, ArrowRight, Download, LoaderCircle, Smartphone } from 'lucide-react'
+import { Apple, ArrowRight, Download, LoaderCircle, Smartphone } from 'lucide-react'
 import type { OutputFormat, Selection } from '../model'
-import { isOverLimit, timecode } from '../model'
+import { timecode } from '../model'
 
 export function ExportBar({ selection, format, name, exporting, disabled, onFormat, onName, onExport }: {
   selection: Selection
@@ -12,17 +12,14 @@ export function ExportBar({ selection, format, name, exporting, disabled, onForm
   onName: (name: string) => void
   onExport: () => void
 }) {
-  const over = isOverLimit(selection)
   return (
     <footer className="export-bar panel">
       <div className="selection-summary">
         <div className="summary-range">
           <span>{timecode(selection.inPoint)}</span><ArrowRight size={13} /><span>{timecode(selection.outPoint)}</span>
-          <span className={over ? 'duration-label over-limit' : 'duration-label'}>{(selection.outPoint - selection.inPoint).toFixed(2)} s</span>
+          <span className="duration-label">{(selection.outPoint - selection.inPoint).toFixed(2)} s</span>
         </div>
-        <div className="summary-cover">封面 <span>{timecode(selection.coverTime)}</span>
-          {over && <span className="limit-note"><AlertTriangle size={13} /> 超过 3.0 秒</span>}
-        </div>
+        <div className="summary-cover">封面 <span>{timecode(selection.coverTime)}</span></div>
       </div>
       <div className="export-format">
         <div className="segmented format-toggle" aria-label="导出格式">
@@ -39,7 +36,7 @@ export function ExportBar({ selection, format, name, exporting, disabled, onForm
           <span>文件名</span>
           <input type="text" value={name} onChange={event => onName(event.currentTarget.value)} maxLength={120} placeholder="IMG_0001" />
         </label>
-        <button className="button primary" type="submit" disabled={disabled || exporting || over}>
+        <button className="button primary" type="submit" disabled={disabled || exporting}>
           {exporting ? <LoaderCircle className="spin" size={16} /> : <Download size={16} />}
           {exporting ? '导出中…' : '导出'}
         </button>

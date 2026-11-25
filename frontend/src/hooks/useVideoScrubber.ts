@@ -228,7 +228,7 @@ export function useVideoScrubber(options: Options) {
       if (pending.current && !scheduled.current) applySeek(pending.current)
     }
     const onAvailableFrame = () => {
-      setReady(true)
+      if (video.readyState >= video.HAVE_CURRENT_DATA) setReady(true)
       if (video.seeking || scheduled.current) return
       if (pending.current) {
         applySeek(pending.current)
@@ -250,6 +250,7 @@ export function useVideoScrubber(options: Options) {
       error: onMediaError,
       loadedmetadata: onMetadata,
       loadeddata: onAvailableFrame,
+      canplay: onAvailableFrame,
       seeked: onAvailableFrame,
     }
     for (const [event, listener] of Object.entries(listeners)) video.addEventListener(event, listener)

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import FileResponse, Response
 from starlette.background import BackgroundTask
 
-from app.config import MAX_CLIP_DURATION, PROXY_MAX_EDGE
+from app.config import PROXY_MAX_EDGE
 from app.routers.luts import LutServiceDep
 from app.routers.sessions import SessionDep
 from app.schemas import ExportRequest, GradeRequest, PreviewClipRequest, PreviewFrameRequest
@@ -23,11 +23,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/session/{session_id}")
 
 
-def _duration(body: PreviewClipRequest) -> float:
-    duration = Decimal(str(body.out_point)) - Decimal(str(body.in_point))
-    if not 0 < duration <= MAX_CLIP_DURATION:
-        raise HTTPException(400, "片段时长必须大于 0 且不超过 3 秒")
-    return float(duration)
+def _clip_duration(body: PreviewClipRequest, video_duration: float) -> float:
+    if not 0 <= body.in_point < body.out_point <= video_duration:
+        raise HTTPException(400, "片段范围必须满足 0 <= in_point < out_point <= 视频时长")
+    return float(Decimal(str(body.out_point)) - Decimal(str(body.in_point)))
 
 
 def _grade(body: GradeRequest, service: LutService, session: Session) -> dict:
@@ -64,7 +63,7 @@ def preview_frame(
 def preview_clip(
     session: SessionDep, service: LutServiceDep, body: PreviewClipRequest
 ) -> FileResponse:
-    duration = _duration(body)
+    duration = _clip_duration(body, session.video.duration)
     grade = _grade(body, service, session)
     directory = Path(tempfile.mkdtemp(prefix="clip-", dir=session.output_dir))
     path = directory / "preview.mp4"
@@ -72,6 +71,7 @@ def preview_clip(
         ffmpeg_service.render_clip(
             session.original_path, body.in_point, duration, dst=path, preview=True,
             dimensions=ffmpeg_service.video_dimensions(session.video, PROXY_MAX_EDGE),
+            video_duration=session.video.duration,
             **grade,
         )
     except BaseException as exc:
@@ -99,7 +99,8 @@ def _render_export(
 
     ffmpeg_service.render_clip(
         session.original_path, body.in_point, duration, dst=clip,
-        dimensions=dimensions, brand="mp42" if samsung else None, **grade,
+        dimensions=dimensions, video_duration=session.video.duration,
+        brand="mp42" if samsung else None, **grade,
     )
     ffmpeg_service.render_image(
         session.original_path, body.cover_time, dst=cover, video_duration=session.video.duration,
@@ -122,7 +123,7 @@ def _render_export(
 @router.post("/export", response_class=FileResponse,
              responses={200: {"content": {"application/zip": {}, "image/jpeg": {}}}})
 def export(session: SessionDep, service: LutServiceDep, body: ExportRequest) -> FileResponse:
-    duration = _duration(body)
+    duration = _clip_duration(body, session.video.duration)
     if not body.in_point <= body.cover_time <= body.out_point:
         raise HTTPException(400, "cover_time 必须在 [in_point, out_point] 范围内")
 

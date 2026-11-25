@@ -172,7 +172,7 @@ def render_image(
 
     def write_frame(seek: float, filters: str) -> None:
         _run([
-            *_FFMPEG, "-ss", str(seek), "-i", str(src), *_MAP_VIDEO,
+            *_FFMPEG, "-ss", f"{seek:.6f}", "-i", str(src), *_MAP_VIDEO,
             "-vf", filters, "-frames:v", "1", *options, "-update", "1", str(dst),
         ])
 
@@ -187,9 +187,15 @@ def render_image(
                 return
 
     # An accurate seek after the last frame timestamp yields no frame.
-    write_frame(tail_start, f"reverse,{vf}")
-    if not dst.is_file():
-        raise FFmpegError("No video frame at the requested time")
+    window = 1
+    while True:
+        write_frame(tail_start, f"reverse,{vf}")
+        if dst.is_file():
+            return
+        if tail_start == 0:
+            raise FFmpegError("No video frame at the requested time")
+        window *= 2
+        tail_start = max(0, video_duration - window)
 
 
 def render_clip(
@@ -200,6 +206,7 @@ def render_clip(
     dst: Path,
     *,
     dimensions: tuple[int, int],
+    video_duration: float,
     intensity: float,
     adjustments: dict | None,
     preview: bool = False,
@@ -210,14 +217,31 @@ def render_clip(
         ["-crf", "23", "-preset", "fast", "-b:a", "96k"] if preview else
         ["-profile:v", "high", "-crf", "18", "-preset", "slow", "-b:a", "128k"]
     )
-    command = [
-        *_FFMPEG, "-ss", str(in_point), "-i", str(src), "-t", str(duration),
-        *_MAP_MEDIA, "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
+    seek = ["-ss", f"{in_point:.6f}", "-i", str(src)]
+    output = [
+        "-t", f"{max(duration, 0.000001):.6f}",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
         *encoding, "-write_tmcd", "0",
     ]
     if brand:
-        command.extend(["-brand", brand])
-    _run([*command, "-movflags", "+faststart", str(dst)])
+        output.extend(["-brand", brand])
+    output.extend(["-movflags", "+faststart", str(dst)])
+    _run([*_FFMPEG, *seek, *_MAP_MEDIA, "-vf", vf, *output])
+
+    if _run([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=index", "-of", "csv=p=0", str(dst),
+    ]).strip():
+        return
+
+    # A cut between frame timestamps can leave a file with only audio or no streams.
+    with tempfile.TemporaryDirectory(dir=dst.parent) as directory:
+        still = Path(directory) / "frame.png"
+        render_image(
+            src, in_point, lut_path, still, intensity=intensity, adjustments=adjustments,
+            video_duration=video_duration, dimensions=dimensions,
+        )
+        _run([*_FFMPEG, "-loop", "1", "-i", str(still), *seek, *_MAP_VIDEO, "-map", "1:a:0?", *output])
 
 
 def _clamp(v: float, lo: float, hi: float) -> float:
