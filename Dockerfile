@@ -1,5 +1,13 @@
-# Live Photo Tool —— 基于 uv 的镜像构建
-# uv 官方镜像已内置 uv，并附带 Python 3.11
+FROM node:22-slim AS frontend-builder
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
+RUN npm install --global "$(node -p 'require("./package.json").packageManager')" \
+    && pnpm install --frozen-lockfile
+
+COPY frontend/ ./
+RUN pnpm run build
+
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim
 
 # 安装 FFmpeg 及 HEIC 依赖
@@ -19,16 +27,15 @@ ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
 
 # 先只拷贝依赖描述，利用 Docker 层缓存
 COPY backend/pyproject.toml backend/uv.lock backend/.python-version ./
-RUN uv sync --frozen --no-install-project
+RUN uv sync --frozen --no-install-project --no-dev
 
 # 拷贝后端代码与内置 LUT
-COPY backend/ .
-
-# 拷贝前端静态资源到容器内 static 目录
-COPY frontend/ /app/static/
+COPY backend/app/ /app/app/
+COPY backend/luts/ /app/luts/
+COPY --from=frontend-builder /frontend/dist /app/static
 
 # 创建运行所需目录
-RUN mkdir -p /app/workspace /app/uploads
+RUN mkdir -p /app/workspace /app/uploads /app/luts/user
 
 ENV STATIC_DIR=/app/static \
     WORKSPACE_DIR=/app/workspace \
@@ -38,4 +45,4 @@ ENV STATIC_DIR=/app/static \
 
 EXPOSE 8080
 
-CMD ["uv", "run", "--frozen", "python", "app.py"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]

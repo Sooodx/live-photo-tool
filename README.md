@@ -1,75 +1,72 @@
 # Live Photo Tool
 
-LOG 视频套 LUT + 导出 Apple Live Photo / 三星 Motion Photo 的本地 Web 工具。
+在浏览器中为 `.mov` 或 `.mp4` 视频套用 LUT、调整色调，选取最长 3 秒的片段和封面，再导出为 Apple Live Photo 或三星 / 谷歌 Motion Photo。视频在本地处理。
 
-在浏览器中上传 Panasonic V-Log（及其他 Log 格式）`.mov` / `.mp4` 文件，选择 LUT 还原色彩，
-裁剪片段（≤ 3 秒），导出为 **Apple Live Photo**（HEIC + MOV）或 **三星/谷歌 Motion Photo**
-（单个 JPEG 内嵌 MP4）。全程本地 Docker 运行，无数据外传。
+## 功能
 
-## 功能一览
-
-- **上传与代理**：拖拽上传 `.mov` / `.mp4`，后端异步生成低分辨率代理 + 时间轴缩略图，随时可「重新选择视频」。
-- **时间轴选区**：canvas 时间轴，拖动入点 / 出点 / 封面三手柄选取 ≤3s 片段与封面帧；支持时间轴拖拽。
-- **LUT 还原**：内置占位 LUT，可上传自定义 `.cube`；LUT 强度滑块 0–100%（split+blend 实时混合）。
-- **色调调整**：曝光 / 对比度 / 高光 / 阴影 / 白色色阶 / 黑色色阶（FFmpeg `exposure` + `eq` + `curves`），滑块调整后自动重新预览。
-- **封面选取**：播放/拖动视频到目标画面，一键「把当前帧设为封面」。
-- **选区预览**：弹框预览套了 LUT + 色调调整后的选区片段（低分辨率代理）。
-- **导出格式可选**：
-  - **Apple Live Photo** —— ZIP 内含同名 HEIC + MOV，靠共享 UUID（ContentIdentifier）配对，经 AirDrop / iCloud 导入 iOS 相册。
-  - **三星 / 谷歌 Motion Photo** —— 单个 JPEG（文件名自动加 `MV` 前缀），尾部附加 **Samsung SEF footer**（字段 `Image_UTC_Data` + `MotionPhoto_Info` + `MotionPhoto_Data` 内嵌 MP4，`SEFH` version 107 索引），并写入 `GCamera:MotionPhoto` + `Container:Directory` XMP。
-    - 字段集与 SEF 字节算法对照 Galaxy 真机样本反向工程：用真机字段可逐字节重建其 footer。
-    - 内嵌视频降采样到长边 ≤ 1920 + `mp42` 容器（贴近真机：视频降采样、静态封面保持全分辨率），以确保三星 Gallery 内联播放器能播放。
-    - ⚠️ **传输务必保留原始字节**：用 USB / 微信「文件」/ 网盘传，**不要当「图片」发**——微信等会重新压缩并剥离 footer，导致动态信息丢失。
+- **实时调色** · WebGL2 3D LUT 引擎支持最高 60 fps 的实时预览，可调 LUT 强度、曝光、对比度、高光、阴影、白色色阶和黑色色阶。支持导入 33³ 或 65³ 的 `.cube` 文件。
+- **快速拖动与裁剪** · FFmpeg 生成带原始音轨（如有）的低分辨率代理和时间轴缩略图。在可缩放的时间轴上选取入点、出点和封面。空格播放或暂停，左右方向键逐帧移动，按住 Shift 时每次移动 0.5 秒，`I` / `O` / `C` 设置入点、出点和封面，按住 `B` 对比原片。
+- **动态照片预览** · 按住封面播放选区，松开回到封面。导出前可用「FFmpeg 精确校验」检查渲染结果。
+- **Apple Live Photo** · 下载含配对 HEIC 和 MOV 文件的 ZIP。
+- **三星 / 谷歌 Motion Photo** · 下载嵌入 MP4 的单个 JPG，包含 Samsung SEF v107 和 Motion Photo XMP 元数据。传输时请按原文件发送，避免图片压缩移除动态数据。
 
 ## 技术栈
 
-- 前端：HTML + Vanilla JS（无框架）
-- 后端：Python 3.11 + Flask，依赖用 [uv](https://docs.astral.sh/uv/) 管理
-- 视频处理：FFmpeg
-- 部署：Docker + docker-compose
+- 前端使用 React 19、TypeScript、Vite、Tailwind CSS v4 和 WebGL2。
+- 后端使用 Python 3.11、FastAPI、Uvicorn 和 Pydantic v2，通过 `uv` 管理依赖，调用 FFmpeg 处理视频。
+- Docker 多阶段构建生成 Vite 静态资源，由 FastAPI 在运行时统一提供页面和 API。
 
 ## 目录结构
 
-```
+```text
 live-photo-tool/
-├── docker-compose.yml
-├── Dockerfile                 # 基于 uv 官方镜像
 ├── backend/
-│   ├── pyproject.toml         # uv 依赖声明
-│   ├── uv.lock                # 锁定文件
-│   ├── .python-version        # 固定 Python 3.11
-│   ├── app.py                 # Flask 主应用
-│   ├── config.py              # 配置（环境变量）
-│   ├── luts/                  # 内置 LUT（当前为占位恒等 LUT）
-│   └── modules/
-│       ├── ffmpeg_utils.py    # FFmpeg 调用封装
-│       ├── lut_manager.py     # LUT 管理
-│       ├── live_photo.py      # Live Photo 封装
-│       └── session_manager.py # 会话与临时文件管理
-└── frontend/
-    ├── index.html
-    ├── style.css
-    └── app.js
+│   ├── app/
+│   │   ├── main.py          # FastAPI 入口
+│   │   ├── config.py        # 环境变量和运行目录
+│   │   ├── schemas.py       # Pydantic 模型
+│   │   ├── routers/        # 会话、LUT 和媒体 API
+│   │   └── services/       # FFmpeg、导出、LUT 和会话管理
+│   ├── luts/               # 内置 LUT
+│   ├── tests/              # API 集成测试
+│   ├── pyproject.toml
+│   └── uv.lock
+├── frontend/
+│   ├── src/                # React 界面和 WebGL2 引擎
+│   ├── dist/               # Vite 构建产物
+│   ├── package.json
+│   └── pnpm-lock.yaml
+├── Dockerfile
+└── docker-compose.yml
 ```
 
-## 本地开发（uv）
+## 本地开发
 
-需要本机已安装 `ffmpeg`、`ffprobe`。
+准备 `uv`、Python 3.11、`ffmpeg`、`ffprobe`、Node.js 22.13 或更新版本，以及 `frontend/package.json` 中指定的 pnpm 版本。
+
+在仓库根目录打开两个终端，分别启动后端和前端。
 
 ```bash
 cd backend
-uv sync                 # 创建 .venv 并安装依赖
-uv run python app.py    # 启动，访问 http://localhost:8080
+uv sync && uv run uvicorn app.main:app --reload --port 8080
 ```
-
-## Docker 运行
 
 ```bash
-docker compose up --build       # 构建并启动
-# 浏览器打开 http://localhost:8080
+cd frontend
+pnpm install && pnpm dev
 ```
 
-## 说明
+打开 `http://localhost:5173`。Vite 会将 `/api` 请求转发到 `http://localhost:8080`。
 
-- `backend/luts/*.cube` 目前是**占位恒等 LUT**，请替换为真实的转换 LUT。
-- 也可把自己的 `.cube` 放进 `./my-luts`（compose 已挂载到容器），或在前端上传自定义 LUT。
+如需本地运行生产构建，请在仓库根目录执行以下命令。FastAPI 默认从 `frontend/dist` 提供页面，打开 `http://localhost:8080` 即可访问。
+
+```bash
+(cd frontend && pnpm install --frozen-lockfile && pnpm build)
+(cd backend && uv sync && uv run uvicorn app.main:app --port 8080)
+```
+
+## Docker Compose
+
+在仓库根目录运行 `docker compose up --build`，然后打开 `http://localhost:8080`。
+
+Compose 会自动挂载 `./workspace` 和 `./my-luts`。将自定义 `.cube` 放入 `./my-luts` 后刷新页面即可使用，也可直接在页面上传 LUT。内置 LUT 为恒等占位文件，转换 Log 色彩时请选用实际的转换 LUT。

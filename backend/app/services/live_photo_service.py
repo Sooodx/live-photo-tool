@@ -7,11 +7,16 @@
 from __future__ import annotations
 
 import struct
-import subprocess
+import time
 import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
+
+import pillow_heif
+from PIL import Image
+
+from app.services.ffmpeg_service import _run
 
 # Apple 用于标记 Live Photo 静态帧的 XMP（apple_desktop 命名空间）
 _XMP_TEMPLATE = """<x:xmpmeta xmlns:x="adobe:ns:meta/">
@@ -30,39 +35,12 @@ def new_content_identifier() -> str:
 
 
 def png_to_heic(png_path: Path, heic_path: Path, content_id: str) -> Path:
-    """将封面 PNG 转为 HEIC，并写入 Apple Live Photo XMP。
-
-    若 pillow-heif 不可用，降级为 JPEG（iOS 仍可识别，兼容性略低）。
-    返回实际生成文件的路径（可能是 .jpg）。
-    """
-    from PIL import Image
-
-    img = Image.open(png_path).convert("RGB")
+    """Encode the cover once, including the pairing UUID in its XMP."""
     xmp = _XMP_TEMPLATE.format(uuid=content_id).encode("utf-8")
-
-    try:
-        import pillow_heif  # noqa: F401
-
-        pillow_heif.register_heif_opener()
-        img.save(heic_path, format="HEIF", quality=95)
-        _write_xmp(heic_path, xmp)
-        return heic_path
-    except Exception:  # noqa: BLE001 - 降级到 JPEG
-        jpg_path = heic_path.with_suffix(".jpg")
-        img.save(jpg_path, format="JPEG", quality=95, xmp=xmp)
-        return jpg_path
-
-
-def _write_xmp(heic_path: Path, xmp: bytes) -> None:
-    """尝试用 pillow-heif 写入 XMP；失败则忽略（不影响主流程）。"""
-    try:
-        import pillow_heif
-
-        heif = pillow_heif.open_heif(str(heic_path))
-        heif.info["xmp"] = xmp
-        heif.save(str(heic_path))
-    except Exception:  # noqa: BLE001
-        pass
+    with Image.open(png_path) as cover:
+        image = cover.convert("RGB")
+    pillow_heif.from_pillow(image).save(heic_path, quality=95, xmp=xmp)
+    return heic_path
 
 
 def inject_mov_content_id(mov_path: Path, content_id: str) -> None:
@@ -72,17 +50,16 @@ def inject_mov_content_id(mov_path: Path, content_id: str) -> None:
     """
     tmp = mov_path.with_name(mov_path.stem + "_meta" + mov_path.suffix)
     cmd = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-hide_banner", "-v", "error", "-nostdin", "-y",
         "-i", str(mov_path),
-        "-map_metadata", "0",
+        "-map", "0:v:0", "-map", "0:a:0?", "-map_metadata", "0",
+        "-write_tmcd", "0",
         "-metadata", f"com.apple.quicktime.content.identifier={content_id}",
         "-c", "copy",
         "-movflags", "use_metadata_tags+faststart",
         str(tmp),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise RuntimeError(f"注入 MOV 元数据失败:\n{proc.stderr[-2000:]}")
+    _run(cmd)
     tmp.replace(mov_path)
 
 
@@ -217,10 +194,6 @@ def create_motion_photo(
 
     presentation_ts_us：静态封面帧在视频中的时间点（微秒），-1 表示不指定。
     """
-    import time
-
-    from PIL import Image
-
     video_bytes = Path(clip_mp4).read_bytes()
     utc_ms = int(time.time() * 1000)
     footer, image_padding, video_size = build_samsung_footer(video_bytes, utc_ms)
@@ -229,9 +202,9 @@ def create_motion_photo(
         ts=int(presentation_ts_us), pad=image_padding, vsize=video_size
     ).encode("utf-8")
 
-    img = Image.open(cover_png).convert("RGB")
     buf = BytesIO()
-    img.save(buf, format="JPEG", quality=95)
+    with Image.open(cover_png) as cover:
+        cover.convert("RGB").save(buf, format="JPEG", quality=95)
     jpeg_with_xmp = _insert_xmp_app1(buf.getvalue(), xmp)
 
     Path(dst_jpg).write_bytes(jpeg_with_xmp + footer)

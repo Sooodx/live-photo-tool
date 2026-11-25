@@ -14,42 +14,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # -------------------------------------------------------------------------
-  # 1. 前端 JS 语法检查
-  # -------------------------------------------------------------------------
   frontend-check:
-    name: Frontend · JS 语法检查
+    name: Frontend · 类型检查、测试与构建
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
-      - name: 检查 JS 语法 (node --check)
+      - name: 安装 pnpm
+        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 类型检查、测试与构建
         run: |
-          set -e
-          cd frontend
-          fail=0
-          for f in *.js; do
-            if node --check "$f" 2>err.txt; then
-              echo "✓ $f"
-            else
-              echo "✗ $f"
-              cat err.txt
-              fail=1
-            fi
-          done
-          rm -f err.txt
-          exit $fail
+          pnpm exec tsc --noEmit
+          pnpm test
+          pnpm run build
 
-  # -------------------------------------------------------------------------
-  # 2. 后端导入 / 语法检查
-  # -------------------------------------------------------------------------
   backend-check:
-    name: Backend · 导入检查
+    name: Backend · 语法检查与测试
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
 
@@ -65,23 +60,13 @@ jobs:
           enable-cache: true
 
       - name: 同步依赖
-        run: |
-          cd backend
-          uv sync --frozen
+        run: uv sync --frozen --all-groups
 
-      - name: 语法检查（py_compile）
+      - name: 语法检查与测试
         run: |
-          cd backend
-          uv run python -m compileall -q app.py config.py modules/
+          uv run python -m compileall -q app/
+          uv run pytest -v
 
-      - name: 导入检查（确认模块能正常加载）
-        run: |
-          cd backend
-          uv run python -c "import app; import config; from modules import ffmpeg_utils, lut_manager, live_photo, session_manager; print('import OK')"
-
-  # -------------------------------------------------------------------------
-  # 3. Docker 镜像构建验证（不发布）
-  # -------------------------------------------------------------------------
   docker-build:
     name: Docker · 镜像构建验证
     runs-on: ubuntu-latest
@@ -101,6 +86,11 @@ jobs:
           cache-to: type=gha,mode=max
           tags: live-photo-tool:ci
 
-      - name: 冒烟：镜像内可正常调用 ffmpeg / python
+      - name: 验证镜像中的 FFmpeg、FastAPI 和静态资源
         run: |
-          docker run --rm live-photo-tool:ci sh -c "ffmpeg -version | head -1 && uv run --frozen python -c 'import flask; print(\"flask\", flask.__version__)'"
+          docker run --rm live-photo-tool:ci sh -ec '
+            command -v ffmpeg >/dev/null
+            ffmpeg -version | head -1
+            python -c "import fastapi, app.main; print(\"fastapi\", fastapi.__version__)"
+            test -f /app/static/index.html
+          '
