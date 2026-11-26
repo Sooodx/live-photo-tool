@@ -6,8 +6,8 @@ const DIVIDER_SIZE = 16
 const MIN_MAIN_WIDTH = 440
 const MIN_GRADING_WIDTH = 245
 const MIN_PREVIEW_HEIGHT = 270
-const MIN_TIMELINE_HEIGHT = 192
-const DEFAULT_TIMELINE_HEIGHT = 210
+const MIN_TIMELINE_HEIGHT = 160
+const DEFAULT_TIMELINE_HEIGHT = 168
 
 interface WorkspaceLayoutProps {
   preview: ReactNode
@@ -111,7 +111,7 @@ export function WorkspaceLayout({ preview, timeline, grading, live }: WorkspaceL
     return () => observer.disconnect()
   }, [])
 
-  const preferredGradingWidth = gradingWidth ?? clamp(Math.round(width * .24), 255, 315)
+  const preferredGradingWidth = gradingWidth ?? clamp(Math.round(width * .22), MIN_GRADING_WIDTH, 300)
   const maxTimelineHeight = Math.max(MIN_TIMELINE_HEIGHT, height - DIVIDER_SIZE - MIN_PREVIEW_HEIGHT)
   const maxGradingWidth = Math.max(MIN_GRADING_WIDTH, width - DIVIDER_SIZE - MIN_MAIN_WIDTH)
   const style = {

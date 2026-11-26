@@ -35,8 +35,8 @@ export function VideoViewport({
           </span>
         </div>
       </header>
-      <div className="stage">
-        <div className="media-plate" style={{ '--media-ratio': ratio } as CSSProperties}>
+      <div className="stage" style={{ '--media-ratio': ratio } as CSSProperties}>
+        <div className="media-plate">
           <div className={`media-stack ${animated ? 'is-animated' : ''}`}>
             {video}
             <canvas ref={canvasRef} className={`video-canvas ${fallback ? 'is-hidden' : ''}`} aria-hidden="true" />
