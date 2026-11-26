@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import { parseCube } from './cubeParser.ts'
 
@@ -55,4 +56,24 @@ test('malformed cubes, unsupported dimensions and inverted domains are rejected'
   const valid = cube(33)
   assert.throws(() => parseCube(valid + '\n0 0 0'), /超过/)
   assert.throws(() => parseCube('DOMAIN_MIN 0 1 0\n' + valid), /DOMAIN_MAX/)
+})
+
+test('bundled LUTs parse into distinct 33-point textures', () => {
+  const directory = new URL('../../../backend/luts/builtin/', import.meta.url)
+  const files = readdirSync(directory).filter(file => file.endsWith('.cube'))
+  assert.ok(files.length > 0)
+  const [red, green, blue] = [27, 16, 10]
+  const offset = (red + green * 33 + blue * 33 ** 2) * 4
+  const original = [red, green, blue].map(value => Math.round(value / 32 * 255)).join(',')
+  const colors = new Set<string>()
+  for (const file of files) {
+    const lut = parseCube(readFileSync(new URL(file, directory), 'utf8'))
+    assert.equal(lut.size, 33, file)
+    assert.deepEqual(lut.domainMin, [0, 0, 0], file)
+    assert.deepEqual(lut.domainMax, [1, 1, 1], file)
+    const sample = lut.rgba8.slice(offset, offset + 3).join(',')
+    assert.notEqual(sample, original, file)
+    colors.add(sample)
+  }
+  assert.equal(colors.size, files.length)
 })

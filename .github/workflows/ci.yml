@@ -86,11 +86,13 @@ jobs:
           cache-to: type=gha,mode=max
           tags: live-photo-tool:ci
 
-      - name: 验证镜像中的 FFmpeg、FastAPI 和静态资源
+      - name: 验证镜像中的 FFmpeg、FastAPI、内置 LUT 和静态资源
         run: |
           docker run --rm live-photo-tool:ci sh -ec '
             command -v ffmpeg >/dev/null
             ffmpeg -version | head -1
             python -c "import fastapi, app.main; print(\"fastapi\", fastapi.__version__)"
+            python -c "from app.main import app; assert sum(lut.source == \"builtin\" for lut in app.state.luts.list()) == 4"
+            test -s /app/luts/builtin/LICENSE.txt
             test -f /app/static/index.html
           '

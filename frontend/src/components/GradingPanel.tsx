@@ -73,6 +73,9 @@ export const GradingPanel = memo(function GradingPanel(props: GradingProps) {
   const fileInput = useRef<HTMLInputElement>(null)
   const { adjustments, curve, onAdjust } = props
   const selected = props.luts.find(lut => lut.id === props.selectedId)
+  const builtins = props.luts.filter(lut => lut.source === 'builtin')
+  const userLuts = props.luts.filter(lut => lut.source !== 'builtin')
+  const builtin = selected?.builtin
   return (
     <aside className="grading-panel panel" aria-label="调色面板">
       <header className="panel-heading">
@@ -97,13 +100,22 @@ export const GradingPanel = memo(function GradingPanel(props: GradingProps) {
         <div className="select-wrap">
           <select aria-label="选择 LUT" value={props.selectedId} onChange={event => props.onSelect(event.currentTarget.value)}>
             <option value="">无 LUT（原片）</option>
-            {props.luts.length > 0 && <optgroup label="我的 LUT">
-              {props.luts.map(lut => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
+            {builtins.length > 0 && <optgroup label="内置风格 LUT（Rec.709 SDR）">
+              {builtins.map(lut => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
+            </optgroup>}
+            {userLuts.length > 0 && <optgroup label="我的 LUT">
+              {userLuts.map(lut => <option key={lut.id} value={lut.id}>{lut.name}</option>)}
             </optgroup>}
           </select>
           {props.lutLoading ? <LoaderCircle className="spin" size={15} /> : <ChevronDown size={15} />}
         </div>
         {selected && <p className="lut-details">{selected.size}³ · {selected.description}</p>}
+        {builtin && <p className="lut-details">
+          {builtin.input_color_space} ·{' '}
+          <a className="underline" href={builtin.source_url} target="_blank" rel="noreferrer">{builtin.upstream} {builtin.version}</a>
+          {' · '}
+          <a className="underline" href={builtin.license_url} target="_blank" rel="noreferrer">{builtin.license}</a>
+        </p>}
         <div className="adjustment-row strength-row">
           <div className="slider-label"><label htmlFor="lut-intensity">LUT 强度</label><output>{props.intensity}%</output></div>
           <input id="lut-intensity" className="grade-slider" type="range" min={0} max={100} value={props.intensity}

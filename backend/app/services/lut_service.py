@@ -1,4 +1,4 @@
-"""Catalog, validation and persistent storage for user LUTs."""
+"""Catalog, validation and persistent storage for LUTs."""
 
 import errno
 import os
@@ -11,13 +11,51 @@ from pathlib import Path, PureWindowsPath
 from typing import BinaryIO, Iterator
 from urllib.parse import quote
 
-from app.schemas import LutItem, LutUploadResponse
+from app.config import BACKEND_DIR
+from app.schemas import BuiltinLutDetails, LutItem, LutUploadResponse
 from app.services.session_manager import copy_upload
 
 _UPLOAD_ID = re.compile(r"custom_[0-9a-f]{32}")
 _TITLE = re.compile(r'TITLE\s+"[^"]*"\s*(?:#.*)?', re.IGNORECASE)
 _DECIMAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 _MAX_FLOAT32 = float.fromhex("0x1.fffffep+127")
+
+_BUILTIN_DIR = BACKEND_DIR / "luts" / "builtin"
+_CC0_URL = "https://creativecommons.org/publicdomain/zero/1.0/"
+_DAEDAL_CINEMATIC = BuiltinLutDetails(
+    input_color_space="Rec.709 SDR",
+    upstream="DAEDAL Cinematic Looks",
+    version="v1",
+    source_url="https://daedal.art/resources/cinematic-pack/",
+    license="CC0 1.0",
+    license_url=_CC0_URL,
+)
+_DAEDAL_FILM_AND_MONO = BuiltinLutDetails(
+    input_color_space="Rec.709 SDR",
+    upstream="DAEDAL Film & Mono",
+    version="v1",
+    source_url="https://daedal.art/resources/film-and-mono-pack/",
+    license="CC0 1.0",
+    license_url=_CC0_URL,
+)
+_BUILTIN_LUTS = {
+    "DAEDAL_01_Teal_Orange.cube": (
+        "builtin_daedal_teal_orange", "青橙电影 · Teal & Orange",
+        "青色阴影与暖橙高光，适合旅行和剧情片段。", _DAEDAL_CINEMATIC,
+    ),
+    "DAEDAL_03_Portrait_400.cube": (
+        "builtin_daedal_portrait_400", "柔和人像 · Portrait 400",
+        "柔和对比与偏暖的肤色，适合人像和日常记录。", _DAEDAL_FILM_AND_MONO,
+    ),
+    "DAEDAL_06_Home_Movie.cube": (
+        "builtin_daedal_home_movie", "暖调复古 · Home Movie",
+        "暖色调与抬高的黑位，适合复古风格的家庭影像。", _DAEDAL_FILM_AND_MONO,
+    ),
+    "DAEDAL_08_Mono_Contrast.cube": (
+        "builtin_daedal_mono_contrast", "高反差黑白 · Mono Contrast",
+        "深阴影与明亮高光，适合强调光影和轮廓。", _DAEDAL_FILM_AND_MONO,
+    ),
+}
 
 
 def _cube_value(token: str) -> float:
@@ -107,6 +145,17 @@ def raw_url(lut_id: str) -> str:
     return f"/api/luts/{quote(lut_id, safe='')}/raw"
 
 
+def _builtin_luts() -> Iterator[tuple[LutItem, Path]]:
+    for file, path, size in _cube_files(_BUILTIN_DIR):
+        entry = _BUILTIN_LUTS.get(file.name)
+        if entry is not None:
+            lut_id, name, description, details = entry
+            yield LutItem(
+                id=lut_id, name=name, description=description, source="builtin",
+                size=size, raw_url=raw_url(lut_id), builtin=details,
+            ), path
+
+
 class LutService:
     def __init__(self, luts_dir: Path) -> None:
         self.user_dir = luts_dir / "user"
@@ -140,7 +189,8 @@ class LutService:
         return None
 
     def list(self) -> list[LutItem]:
-        items = [item for item, _ in self._mounted_luts()]
+        items = [item for item, _ in _builtin_luts()]
+        items.extend(item for item, _ in self._mounted_luts())
         if not self.uploads_dir.is_symlink() and self.uploads_dir.is_dir():
             for entry in sorted(self.uploads_dir.iterdir()):
                 uploaded = self._uploaded_lut(entry)
@@ -151,6 +201,8 @@ class LutService:
     def resolve(self, lut_id: str | None) -> Path | None:
         if not lut_id:
             return None
+        if lut_id.startswith("builtin_"):
+            return next((path for item, path in _builtin_luts() if item.id == lut_id), None)
         if lut_id.startswith("user_"):
             return next((path for item, path in self._mounted_luts() if item.id == lut_id), None)
         if _UPLOAD_ID.fullmatch(lut_id) and not self.uploads_dir.is_symlink():

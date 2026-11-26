@@ -1,4 +1,4 @@
-"""Persistent user LUT catalog, downloads and uploads."""
+"""Built-in and user LUT downloads, catalog and uploads."""
 
 from typing import Annotated
 
@@ -21,7 +21,7 @@ def get_lut_service(request: Request) -> LutService:
 LutServiceDep = Annotated[LutService, Depends(get_lut_service)]
 
 
-@router.get("/luts")
+@router.get("/luts", response_model_exclude_none=True)
 def list_luts(service: LutServiceDep) -> LutsResponse:
     return LutsResponse(luts=service.list())
 

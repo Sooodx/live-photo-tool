@@ -13,6 +13,10 @@
 
 选区可以覆盖整段素材。超过 3 秒的导出文件能否被识别并完整播放，取决于目标设备和相册应用。
 
+## 内置风格 LUT
+
+调色面板的初始选项为「无 LUT（原片）」。内置的青橙电影、柔和人像、暖调复古和高反差黑白适用于 Rec.709 SDR 视频。Log 或 HDR 素材需先转换到 Rec.709 SDR。[内置 LUT 来源、版本和许可证](backend/luts/builtin/README.md)
+
 ## 技术栈
 
 - 前端使用 React 19、TypeScript、Vite、Tailwind CSS v4 和 WebGL2。
@@ -30,6 +34,7 @@ live-photo-tool/
 │   │   ├── schemas.py       # Pydantic 模型
 │   │   ├── routers/        # 会话、LUT 和媒体 API
 │   │   └── services/       # FFmpeg、导出、LUT 和会话管理
+│   ├── luts/builtin/       # 内置风格 LUT 及许可证
 │   ├── luts/user/          # 本地用户 LUT 库（运行时创建）
 │   ├── tests/              # API 集成测试
 │   ├── pyproject.toml
@@ -74,4 +79,4 @@ pnpm install && pnpm dev
 
 Compose 将 `./workspace` 用作视频会话目录，将 `./my-luts` 用作持久化 LUT 库。网页上传的 LUT 会写入 `./my-luts/uploads/`，换视频或重建容器后可继续使用。也可以手动将 `.cube` 放入 `./my-luts`，刷新页面后选用。
 
-直接运行后端时，LUT 库的默认路径是 `backend/luts/user/`。
+内置 LUT 和许可证随镜像打包在 `/app/luts/builtin/`。直接运行后端时，用户 LUT 库的默认路径是 `backend/luts/user/`。

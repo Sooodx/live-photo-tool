@@ -37,9 +37,17 @@ export interface LutInfo {
   id: string
   name: string
   description: string
-  source: 'user' | 'custom'
+  source: 'builtin' | 'user' | 'custom'
   size: number
   raw_url: string
+  builtin?: {
+    input_color_space: string
+    upstream: string
+    version: string
+    source_url: string
+    license: string
+    license_url: string
+  }
 }
 
 interface UploadedLut {

@@ -47,13 +47,23 @@ class ThumbnailsResponse(BaseModel):
     items: list[ThumbnailItem]
 
 
+class BuiltinLutDetails(BaseModel):
+    input_color_space: str
+    upstream: str
+    version: str
+    source_url: str
+    license: str
+    license_url: str
+
+
 class LutItem(BaseModel):
     id: str
     name: str
     description: str
-    source: Literal["user", "custom"]
+    source: Literal["builtin", "user", "custom"]
     size: int
     raw_url: str
+    builtin: BuiltinLutDetails | None = None
 
 
 class LutsResponse(BaseModel):

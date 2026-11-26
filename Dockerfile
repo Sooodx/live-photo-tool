@@ -31,6 +31,7 @@ RUN uv sync --frozen --no-install-project --no-dev
 
 # 拷贝后端代码与前端构建产物
 COPY backend/app/ /app/app/
+COPY backend/luts/builtin/ /app/luts/builtin/
 COPY --from=frontend-builder /frontend/dist /app/static
 
 # 创建运行所需目录

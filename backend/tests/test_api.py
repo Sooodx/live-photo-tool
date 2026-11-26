@@ -123,7 +123,7 @@ def test_health_static_spa_and_cors(client):
 def test_mounted_luts_list_and_raw_download(client, settings):
     response = client.get("/api/luts")
     assert response.status_code == 200
-    items = response.json()["luts"]
+    items = [item for item in response.json()["luts"] if item["source"] != "builtin"]
     assert items == [{
         "id": "user_Film_Grade", "name": "Film Grade", "description": "挂载目录 LUT",
         "source": "user", "size": 33, "raw_url": "/api/luts/user_Film_Grade/raw",
@@ -135,6 +135,36 @@ def test_mounted_luts_list_and_raw_download(client, settings):
     assert raw.content == (settings.luts_dir / "user" / "Film Grade.cube").read_bytes()
     assert client.get("/api/luts/VLog_to_V709/raw").status_code == 404
     assert client.get("/api/luts/user_broken/raw").status_code == 404
+
+
+def test_builtin_luts_list_download_and_apply_in_ffmpeg(client, session):
+    _, base, _ = session
+    items = [item for item in client.get("/api/luts").json()["luts"] if item["source"] == "builtin"]
+    assert {item["id"] for item in items} == {
+        "builtin_daedal_teal_orange", "builtin_daedal_portrait_400",
+        "builtin_daedal_home_movie", "builtin_daedal_mono_contrast",
+    }
+
+    def preview_pixels(lut_id: str | None) -> bytes:
+        response = client.post(base + "/preview-frame", json={"time": 0.5, "lut_id": lut_id})
+        assert response.status_code == 200, response.text
+        with Image.open(BytesIO(response.content)) as image:
+            return image.resize((16, 16)).tobytes()
+
+    original = preview_pixels(None)
+    graded_frames = set()
+    for item in items:
+        assert item["size"] == 33
+        assert item["builtin"]["input_color_space"] == "Rec.709 SDR"
+        assert item["builtin"]["version"] == "v1"
+        assert item["builtin"]["license"] == "CC0 1.0"
+        raw = client.get(item["raw_url"])
+        assert raw.status_code == 200
+        assert raw.content.startswith(b'TITLE "DAEDAL ')
+        graded = preview_pixels(item["id"])
+        assert graded != original, item["id"]
+        graded_frames.add(graded)
+    assert len(graded_frames) == len(items)
 
 
 def test_upload_progress_proxy_range_and_thumbnails(client, session, tmp_path):
@@ -299,7 +329,8 @@ def test_apple_export_pairs_heic_xmp_with_mov_uuid(client, session, settings, tm
 def test_samsung_export_has_valid_samsung_footer_and_embedded_mp4(client, session, settings, tmp_path):
     info, base, _ = session
     response = client.post(base + "/export", json={
-        **CLIP, "cover_time": 0.5, "format": "samsung", "output_name": "???",
+        "in_point": 0.25, "out_point": 1.25, "cover_time": 0.5,
+        "lut_id": "builtin_daedal_mono_contrast", "format": "samsung", "output_name": "???",
     })
     assert response.status_code == 200, response.text
     assert response.headers["content-type"] == "image/jpeg"
@@ -312,6 +343,8 @@ def test_samsung_export_has_valid_samsung_footer_and_embedded_mp4(client, sessio
     assert b'GCamera:MotionPhotoPresentationTimestampUs="250000"' in jpeg
     with Image.open(BytesIO(jpeg)) as cover:
         assert cover.size == (1152, 2048)
+        channels = cover.resize((16, 16)).convert("RGB").tobytes()
+        assert max(max(rgb) - min(rgb) for rgb in zip(channels[::3], channels[1::3], channels[2::3])) <= 3
     video = samsung_embedded_video(jpeg)
     assert video[4:12] == b"ftypmp42"
     mp4 = tmp_path / "embedded.mp4"
